@@ -18,6 +18,8 @@ cp .env.example .env   # then fill in the values
 .venv/bin/python -m pytest
 ```
 
+GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs the same tests on Python 3.11 for every push and pull request.
+
 ## 1. Ingest: match simulator
 
 [`deepkick/simulator.py`](deepkick/simulator.py) plays the 90-minute fixture from `data/league.json` and emits about 1,100 events (`match_metadata`, `pass`, `shot`, `tackle`, `possession_change`, `pressure_event`, `player_run`) that follow the event contract in [`deepkick/contracts.py`](deepkick/contracts.py).
