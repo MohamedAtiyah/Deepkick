@@ -19,6 +19,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from deepkick.contracts import SHOT_SPEED_KMH
+
 LEAGUE_PATH = Path(__file__).resolve().parent.parent / "data" / "league.json"
 KICKOFF = datetime(2026, 10, 27, 15, 0, tzinfo=timezone.utc)
 HALF_SECONDS = 45 * 60
@@ -27,6 +29,9 @@ BATCH_SIZE = 200  # ~90 KB per batch, well under the Basic tier 256 KB limit
 LENGTH, WIDTH = 105.0, 68.0
 CENTRE = (LENGTH / 2, WIDTH / 2)
 BLOCK_SHIFT = 0.4  # how far outfield players follow the ball up or down the pitch from their slot
+TRACK_S = 5 * 60  # every starter's off-ball distance is reported this often
+RUN_M_PER_MIN = {"GK": 55.0, "outfield": 98.0}  # per minute, before the stamina factor (0.8-1.2)
+BOX = (LENGTH - 16.5, WIDTH / 2 - 20.16, WIDTH / 2 + 20.16)  # penalty area: x from, y from, y to
 
 log = logging.getLogger("deepkick.simulator")
 
@@ -75,6 +80,7 @@ class _Match:
         self.pressure = 0.0
         self.clock = 0
         self.half = 1
+        self.tracked_at = 0
 
     def club(self, team: str) -> dict[str, Any]:
         return self.home if team == self.home["id"] else self.away
@@ -154,10 +160,28 @@ class _Match:
                 self.clock += self.rng.randint(3, 9)
                 if self.clock >= end:
                     break
+                if self.clock - self.tracked_at >= TRACK_S:
+                    self.track()
                 self.step()
             self.clock = end
+            self.track()
             self.meta("half_time" if half == 1 else "full_time")
         return self.events
+
+    def track(self) -> None:
+        """Emit an off-ball `player_run` per starter with the distance run since the last report."""
+        minutes = (self.clock - self.tracked_at) / 60
+        self.tracked_at = self.clock
+        if minutes <= 0:
+            return
+        for club in (self.home, self.away):
+            for p in club["starters"]:
+                rate = RUN_M_PER_MIN["GK" if p["position"] == "GK" else "outfield"]
+                rate *= (0.8 + 0.4 * p["ratings"]["stamina"] / 99) * self.rng.uniform(0.92, 1.08)
+                slot = club["formation"]["slots"][p["position"]]
+                at = _clamp(slot["x"], slot["y"])
+                self.emit("player_run", club["id"], p, at,
+                          {"end": _xy(at), "distance_m": round(rate * minutes, 1), "with_ball": False})
 
     def step(self) -> None:
         """Play one on-ball action for the team in possession."""
@@ -181,19 +205,31 @@ class _Match:
         end = _clamp(x + self.rng.gauss(6.3, 12.6), y + self.rng.gauss(0, 10.2))
         recipient = self.pick_near(att, end, exclude=self.carrier, outfield=end[0] > 35)
         length = math.dist(self.ball, end)
-        p_complete = 0.93 - length / 150 - self.pressure * 0.15 - (0.08 if end[0] > 79 else 0)
+        in_box = end[0] >= BOX[0] and BOX[1] <= end[1] <= BOX[2]
+        lines = self.bypassed(dfn, x, end[0])
+        difficulty = min(1.0, 0.4 * min(1.0, length / 30) + 0.3 * in_box
+                         + 0.3 * self.pressure + 0.3 * min(1.0, lines / 3))
+        p_complete = 0.96 - 0.45 * difficulty
         completed = self.rng.random() < p_complete
         self.emit("pass", att, self.carrier, self.ball, {
             "recipient": {"id": recipient["id"], "name": recipient["name"]},
             "end": _xy(end),
             "length_m": round(length, 1),
             "completed": completed,
+            "difficulty": round(difficulty, 2),
         })
         if completed:
             self.carrier, self.ball = recipient, end
         else:
             won_at = _flip(end)
             self.change_possession(dfn, self.pick_near(dfn, won_at), won_at, "interception")
+
+    def bypassed(self, dfn: str, from_x: float, to_x: float) -> int:
+        """Count `dfn` outfield players a forward pass from `from_x` to `to_x` goes past (attacker's frame)."""
+        club = self.club(dfn)
+        shift = (LENGTH - from_x - CENTRE[0]) * BLOCK_SHIFT  # the defending block follows the ball, as in pick_near
+        return sum(from_x < LENGTH - (club["formation"]["slots"][p["position"]]["x"] + shift) < to_x
+                   for p in club["starters"] if p["position"] != "GK")
 
     def player_run(self, att: str) -> None:
         x, y = self.ball
@@ -237,10 +273,13 @@ class _Match:
         r = self.rng.random()
         outcome = ("goal" if r < xg else
                    self.rng.choices(["blocked", "saved", "off_target"], [25, 35, 40])[0])
+        # Longer shots are struck harder; close-range finishes are often placed.
+        low, high = SHOT_SPEED_KMH
+        speed = max(low, min(high, 70 + distance * 1.3 + self.rng.gauss(0, 10)))
         if outcome == "goal":
             self.score[att] += 1
         self.emit("shot", att, self.carrier, self.ball,
-                  {"xg": xg, "distance_m": round(distance, 1), "outcome": outcome})
+                  {"xg": xg, "distance_m": round(distance, 1), "outcome": outcome, "speed_kmh": round(speed, 1)})
         if outcome == "goal":
             self.kickoff_to(dfn, "goal")
         elif outcome == "saved":

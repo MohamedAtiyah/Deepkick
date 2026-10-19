@@ -22,10 +22,13 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 
 ## 1. Ingest: match simulator
 
-[`deepkick/simulator.py`](deepkick/simulator.py) plays the 90-minute fixture from `data/league.json` and emits about 1,100 events (`match_metadata`, `pass`, `shot`, `tackle`, `possession_change`, `pressure_event`, `player_run`) that follow the event contract in [`deepkick/contracts.py`](deepkick/contracts.py).
+[`deepkick/simulator.py`](deepkick/simulator.py) plays the 90-minute fixture from `data/league.json` and emits about 1,500 events (`match_metadata`, `pass`, `shot`, `tackle`, `possession_change`, `pressure_event`, `player_run`) that follow the event contract in [`deepkick/contracts.py`](deepkick/contracts.py).
 
 - **Seeded:** the same `--seed` always produces the same match, event ids and timestamps.
 - **Slot-based:** the player who receives, presses or tackles is picked by how close their formation slot is to the ball (outfield slots shift up and down with play), so strikers shoot and centre-backs defend.
+- **Pass difficulty:** every pass carries `difficulty` (0–1). It rises with pass length, a pass into the box, pressure on the passer and the number of opposition outfield players the pass goes past (line-breaking). Completion odds fall as difficulty rises.
+- **Shot speed:** every shot carries `speed_kmh` (60–130). Longer shots are struck harder.
+- **Distance covered:** every 5 minutes, and at the end of each half, each starter gets an off-ball `player_run` (`with_ball: false`) with the distance run since the last report. Outfield players cover about 9.5–10.5 km a match and keepers about 5 km, scaled by their stamina rating.
 - **Coordinates** are metres on a 105 × 68 pitch, oriented so the acting team always attacks towards `x=105`, the same frame as the formation slots.
 - **`context`** on each event is the match state after that event (score keyed by club id, team in possession, pressure index 0–1).
 - `match_metadata` events mark `kickoff` (with formations, starters and their slots, bench, managers, colours, stadium, referee), `half_time`, `second_half` and `full_time`.
@@ -55,8 +58,10 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 
 [`deepkick/stats.py`](deepkick/stats.py) folds each event into running team and player stats. It is pure Python and makes no model calls. Its `snapshot()` is the match state that the Narrative Agent is allowed to quote, so every number in it is already rounded.
 
-- **Team stats:** goals, shots, shots on target, xG, passes and pass accuracy, tackles won, pressures won, and possession in seconds and as a percentage. Possession time goes to the team that held the ball between two events.
-- **Player stats:** actions, passes, shots, goals, xG, tackles, pressures and distance covered by runs.
+- **Team stats:** goals, shots, shots on target, xG, passes and pass accuracy, average pass length and difficulty, hard passes (difficulty ≥ 0.7) and their completion rate, top shot speed, tackles won, pressures won, and possession in seconds and as a percentage. Possession time goes to the team that held the ball between two events.
+- **Player stats:** actions, passes, shots, goals, xG, top shot speed, tackles, pressures and distance covered.
+- **Momentum:** each team's shots, xG, possession share and final-third entries (completed passes or carries from before x = 70 m to beyond it) over the last 5 minutes of match clock, plus a momentum `value`: the team's share (0–100) of `2 × shots + 10 × xG + final-third entries + 5 × possession share`. The two teams' values add up to 100.
+- **Live context:** the current `pressure_index` (pressure on the team in possession, 0–1) and `possession_team`.
 - **Failure recovery:** events are validated against the contract. A malformed event is skipped, and a redelivered event (Event Hubs delivers at least once) is ignored by `event_id`. Neither changes the state, and both are logged with `fallback=yes`.
 - **Logging:** each handoff logs `stage=stats event_id=… duration_ms=… fallback=yes|no`.
 
@@ -76,9 +81,13 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 | `big_chance` | a missed shot with xG ≥ 0.2 | 2 |
 | `pressure_spell` | a team's third shot within 5 minutes (at most once per 10 minutes per team) | 2 |
 | `half_time` | half-time whistle | 2 |
+| `momentum_swing` | a team's momentum value reaches 70 after the other team was last to reach 70 (from 5:00 on) | 2 |
 | `high_press_win` | a successful press at least 75 m up the pitch | 1 |
+| `speed_milestone` | a shot struck at 120 km/h or faster | 1 |
+| `distance_milestone` | a player passes 5, 8 or 10 km covered | 1 |
+| `pass_milestone` | a player's 50th or 75th pass | 1 |
 
-Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, player, priority, facts`. `facts` copies numbers from the event and the Stats Agent snapshot and nothing else, so the Narrative Agent can only quote real match state. Each handoff logs `stage=moments event_id=… moments=… duration_ms=… fallback=no`.
+Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, player, priority, facts`. `facts` copies numbers from the event and the Stats Agent snapshot and nothing else, so the Narrative Agent can only quote real match state. The only exceptions are labels: a distance milestone's `milestone_km` and a spell's or swing's `window_minutes`. A `momentum_swing` belongs to the team that took momentum, so its `player` is `null`. Each handoff logs `stage=moments event_id=… moments=… duration_ms=… fallback=no`.
 
 ```bash
 # Print the moments of a replayed match as JSON lines
