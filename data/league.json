@@ -1,0 +1,598 @@
+{
+  "league": "Deepkick Fictional League",
+  "pitch": {
+    "length_m": 105,
+    "width_m": 68
+  },
+  "match": {
+    "home": "ASH",
+    "away": "CAL",
+    "stadium": {
+      "name": "Larkspur Park",
+      "city": "Ashvale",
+      "capacity": 31200
+    },
+    "referee": {
+      "id": "REF1",
+      "name": "Ansel Grimward"
+    }
+  },
+  "clubs": [
+    {
+      "id": "ASH",
+      "name": "Ashvale Wanderers",
+      "short_name": "ASH",
+      "colours": {
+        "primary": "#1B4D3E",
+        "secondary": "#F2C14E"
+      },
+      "stadium": "Larkspur Park",
+      "manager": "Halvard Hethering",
+      "formation": {
+        "name": "4-4-2",
+        "slots": {
+          "GK": {
+            "x": 5,
+            "y": 34
+          },
+          "RB": {
+            "x": 30,
+            "y": 60
+          },
+          "RCB": {
+            "x": 22,
+            "y": 44
+          },
+          "LCB": {
+            "x": 22,
+            "y": 24
+          },
+          "LB": {
+            "x": 30,
+            "y": 8
+          },
+          "RM": {
+            "x": 55,
+            "y": 60
+          },
+          "RCM": {
+            "x": 48,
+            "y": 42
+          },
+          "LCM": {
+            "x": 48,
+            "y": 26
+          },
+          "LM": {
+            "x": 55,
+            "y": 8
+          },
+          "RST": {
+            "x": 75,
+            "y": 42
+          },
+          "LST": {
+            "x": 75,
+            "y": 26
+          }
+        }
+      },
+      "starters": [
+        {
+          "id": "ASH01",
+          "name": "Keir Nettlefold",
+          "number": 1,
+          "position": "GK",
+          "foot": "right",
+          "ratings": {
+            "pace": 47,
+            "passing": 60,
+            "shooting": 19,
+            "defending": 35,
+            "stamina": 47
+          }
+        },
+        {
+          "id": "ASH02",
+          "name": "Dace Blackwen",
+          "number": 2,
+          "position": "RB",
+          "foot": "left",
+          "ratings": {
+            "pace": 82,
+            "passing": 75,
+            "shooting": 51,
+            "defending": 80,
+            "stamina": 86
+          }
+        },
+        {
+          "id": "ASH05",
+          "name": "Arlo Thistlewood",
+          "number": 5,
+          "position": "RCB",
+          "foot": "right",
+          "ratings": {
+            "pace": 57,
+            "passing": 57,
+            "shooting": 33,
+            "defending": 77,
+            "stamina": 75
+          }
+        },
+        {
+          "id": "ASH06",
+          "name": "Zeb Brindlecombe",
+          "number": 6,
+          "position": "LCB",
+          "foot": "left",
+          "ratings": {
+            "pace": 59,
+            "passing": 62,
+            "shooting": 33,
+            "defending": 81,
+            "stamina": 73
+          }
+        },
+        {
+          "id": "ASH03",
+          "name": "Soren Fallowmere",
+          "number": 3,
+          "position": "LB",
+          "foot": "left",
+          "ratings": {
+            "pace": 85,
+            "passing": 69,
+            "shooting": 40,
+            "defending": 76,
+            "stamina": 87
+          }
+        },
+        {
+          "id": "ASH07",
+          "name": "Bram Kettleby",
+          "number": 7,
+          "position": "RM",
+          "foot": "right",
+          "ratings": {
+            "pace": 86,
+            "passing": 80,
+            "shooting": 71,
+            "defending": 53,
+            "stamina": 80
+          }
+        },
+        {
+          "id": "ASH08",
+          "name": "Galen Ravensby",
+          "number": 8,
+          "position": "RCM",
+          "foot": "right",
+          "ratings": {
+            "pace": 70,
+            "passing": 75,
+            "shooting": 65,
+            "defending": 65,
+            "stamina": 86
+          }
+        },
+        {
+          "id": "ASH04",
+          "name": "Ivo Dunmarrow",
+          "number": 4,
+          "position": "LCM",
+          "foot": "right",
+          "ratings": {
+            "pace": 76,
+            "passing": 86,
+            "shooting": 68,
+            "defending": 63,
+            "stamina": 84
+          }
+        },
+        {
+          "id": "ASH11",
+          "name": "Idris Thessaly",
+          "number": 11,
+          "position": "LM",
+          "foot": "right",
+          "ratings": {
+            "pace": 85,
+            "passing": 76,
+            "shooting": 68,
+            "defending": 52,
+            "stamina": 88
+          }
+        },
+        {
+          "id": "ASH09",
+          "name": "Corin Rookwell",
+          "number": 9,
+          "position": "RST",
+          "foot": "right",
+          "ratings": {
+            "pace": 84,
+            "passing": 70,
+            "shooting": 79,
+            "defending": 37,
+            "stamina": 77
+          }
+        },
+        {
+          "id": "ASH10",
+          "name": "Florin Underhay",
+          "number": 10,
+          "position": "LST",
+          "foot": "left",
+          "ratings": {
+            "pace": 79,
+            "passing": 61,
+            "shooting": 88,
+            "defending": 37,
+            "stamina": 75
+          }
+        }
+      ],
+      "bench": [
+        {
+          "id": "ASH13",
+          "name": "Alder Oakenshaw",
+          "number": 13,
+          "position": "GK",
+          "foot": "left",
+          "ratings": {
+            "pace": 45,
+            "passing": 62,
+            "shooting": 13,
+            "defending": 42,
+            "stamina": 56
+          }
+        },
+        {
+          "id": "ASH15",
+          "name": "Ebbe Cauldwell",
+          "number": 15,
+          "position": "CB",
+          "foot": "right",
+          "ratings": {
+            "pace": 60,
+            "passing": 56,
+            "shooting": 29,
+            "defending": 78,
+            "stamina": 78
+          }
+        },
+        {
+          "id": "ASH16",
+          "name": "Quill Pendleford",
+          "number": 16,
+          "position": "CM",
+          "foot": "right",
+          "ratings": {
+            "pace": 69,
+            "passing": 77,
+            "shooting": 63,
+            "defending": 67,
+            "stamina": 85
+          }
+        },
+        {
+          "id": "ASH19",
+          "name": "Yorick Pellow",
+          "number": 19,
+          "position": "ST",
+          "foot": "left",
+          "ratings": {
+            "pace": 78,
+            "passing": 66,
+            "shooting": 89,
+            "defending": 33,
+            "stamina": 69
+          }
+        },
+        {
+          "id": "ASH20",
+          "name": "Joss Ostrander",
+          "number": 20,
+          "position": "ST",
+          "foot": "right",
+          "ratings": {
+            "pace": 82,
+            "passing": 62,
+            "shooting": 85,
+            "defending": 26,
+            "stamina": 69
+          }
+        }
+      ]
+    },
+    {
+      "id": "CAL",
+      "name": "Calderbrook Athletic",
+      "short_name": "CAL",
+      "colours": {
+        "primary": "#7A1F2B",
+        "secondary": "#E8E4D8"
+      },
+      "stadium": "The Millrace",
+      "manager": "Wystan Tunstock",
+      "formation": {
+        "name": "4-3-3",
+        "slots": {
+          "GK": {
+            "x": 5,
+            "y": 34
+          },
+          "RB": {
+            "x": 30,
+            "y": 60
+          },
+          "RCB": {
+            "x": 22,
+            "y": 44
+          },
+          "LCB": {
+            "x": 22,
+            "y": 24
+          },
+          "LB": {
+            "x": 30,
+            "y": 8
+          },
+          "CDM": {
+            "x": 40,
+            "y": 34
+          },
+          "RCM": {
+            "x": 52,
+            "y": 46
+          },
+          "LCM": {
+            "x": 52,
+            "y": 22
+          },
+          "RW": {
+            "x": 78,
+            "y": 58
+          },
+          "ST": {
+            "x": 82,
+            "y": 34
+          },
+          "LW": {
+            "x": 78,
+            "y": 10
+          }
+        }
+      },
+      "starters": [
+        {
+          "id": "CAL01",
+          "name": "Kasimir Sallowmere",
+          "number": 1,
+          "position": "GK",
+          "foot": "right",
+          "ratings": {
+            "pace": 39,
+            "passing": 57,
+            "shooting": 19,
+            "defending": 43,
+            "stamina": 53
+          }
+        },
+        {
+          "id": "CAL02",
+          "name": "Mattis Larchmont",
+          "number": 2,
+          "position": "RB",
+          "foot": "left",
+          "ratings": {
+            "pace": 83,
+            "passing": 68,
+            "shooting": 47,
+            "defending": 74,
+            "stamina": 85
+          }
+        },
+        {
+          "id": "CAL04",
+          "name": "Lucan Ullaby",
+          "number": 4,
+          "position": "RCB",
+          "foot": "right",
+          "ratings": {
+            "pace": 57,
+            "passing": 62,
+            "shooting": 30,
+            "defending": 76,
+            "stamina": 73
+          }
+        },
+        {
+          "id": "CAL05",
+          "name": "Emeric Wrexley",
+          "number": 5,
+          "position": "LCB",
+          "foot": "left",
+          "ratings": {
+            "pace": 64,
+            "passing": 59,
+            "shooting": 35,
+            "defending": 85,
+            "stamina": 73
+          }
+        },
+        {
+          "id": "CAL03",
+          "name": "Tamsin Vexley",
+          "number": 3,
+          "position": "LB",
+          "foot": "left",
+          "ratings": {
+            "pace": 77,
+            "passing": 74,
+            "shooting": 41,
+            "defending": 68,
+            "stamina": 89
+          }
+        },
+        {
+          "id": "CAL06",
+          "name": "Nevan Ashgrove",
+          "number": 6,
+          "position": "CDM",
+          "foot": "left",
+          "ratings": {
+            "pace": 63,
+            "passing": 77,
+            "shooting": 56,
+            "defending": 84,
+            "stamina": 85
+          }
+        },
+        {
+          "id": "CAL08",
+          "name": "Dorian Jessamy",
+          "number": 8,
+          "position": "RCM",
+          "foot": "right",
+          "ratings": {
+            "pace": 65,
+            "passing": 81,
+            "shooting": 69,
+            "defending": 61,
+            "stamina": 84
+          }
+        },
+        {
+          "id": "CAL10",
+          "name": "Ulric Elsworthy",
+          "number": 10,
+          "position": "LCM",
+          "foot": "left",
+          "ratings": {
+            "pace": 66,
+            "passing": 84,
+            "shooting": 69,
+            "defending": 57,
+            "stamina": 86
+          }
+        },
+        {
+          "id": "CAL07",
+          "name": "Caius Mossington",
+          "number": 7,
+          "position": "RW",
+          "foot": "right",
+          "ratings": {
+            "pace": 83,
+            "passing": 72,
+            "shooting": 75,
+            "defending": 34,
+            "stamina": 76
+          }
+        },
+        {
+          "id": "CAL09",
+          "name": "Rafe Ironsby",
+          "number": 9,
+          "position": "ST",
+          "foot": "right",
+          "ratings": {
+            "pace": 79,
+            "passing": 69,
+            "shooting": 85,
+            "defending": 32,
+            "stamina": 78
+          }
+        },
+        {
+          "id": "CAL11",
+          "name": "Fenn Grimsdyke",
+          "number": 11,
+          "position": "LW",
+          "foot": "left",
+          "ratings": {
+            "pace": 87,
+            "passing": 73,
+            "shooting": 77,
+            "defending": 42,
+            "stamina": 79
+          }
+        }
+      ],
+      "bench": [
+        {
+          "id": "CAL31",
+          "name": "Gideon Quillfeather",
+          "number": 31,
+          "position": "GK",
+          "foot": "right",
+          "ratings": {
+            "pace": 50,
+            "passing": 56,
+            "shooting": 11,
+            "defending": 45,
+            "stamina": 55
+          }
+        },
+        {
+          "id": "CAL23",
+          "name": "Hollis Varnell",
+          "number": 23,
+          "position": "CB",
+          "foot": "right",
+          "ratings": {
+            "pace": 67,
+            "passing": 65,
+            "shooting": 33,
+            "defending": 85,
+            "stamina": 68
+          }
+        },
+        {
+          "id": "CAL16",
+          "name": "Orrin Quarrington",
+          "number": 16,
+          "position": "CM",
+          "foot": "left",
+          "ratings": {
+            "pace": 65,
+            "passing": 79,
+            "shooting": 63,
+            "defending": 59,
+            "stamina": 86
+          }
+        },
+        {
+          "id": "CAL19",
+          "name": "Bastien Brackwood",
+          "number": 19,
+          "position": "ST",
+          "foot": "left",
+          "ratings": {
+            "pace": 86,
+            "passing": 62,
+            "shooting": 89,
+            "defending": 30,
+            "stamina": 69
+          }
+        },
+        {
+          "id": "CAL27",
+          "name": "Lorcan Yarrowfield",
+          "number": 27,
+          "position": "LW",
+          "foot": "left",
+          "ratings": {
+            "pace": 93,
+            "passing": 76,
+            "shooting": 73,
+            "defending": 39,
+            "stamina": 82
+          }
+        }
+      ]
+    }
+  ]
+}
