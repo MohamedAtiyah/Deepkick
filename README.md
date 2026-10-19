@@ -46,3 +46,19 @@ cp .env.example .env   # then fill in the values
 ```bash
 .venv/bin/python -m deepkick.simulator --seed 42 --out tests/fixtures/replay_ASH-CAL-42.jsonl
 ```
+
+## 2. Interpret: Stats Agent
+
+[`deepkick/stats.py`](deepkick/stats.py) folds each event into running team and player stats. It is pure Python and makes no model calls. Its `snapshot()` is the match state that the Narrative Agent is allowed to quote, so every number in it is already rounded.
+
+- **Team stats:** goals, shots, shots on target, xG, passes and pass accuracy, tackles won, pressures won, and possession in seconds and as a percentage. Possession time goes to the team that held the ball between two events.
+- **Player stats:** actions, passes, shots, goals, xG, tackles, pressures and distance covered by runs.
+- **Failure recovery:** events are validated against the contract. A malformed event is skipped, and a redelivered event (Event Hubs delivers at least once) is ignored by `event_id`. Neither changes the state, and both are logged with `fallback=yes`.
+- **Logging:** each handoff logs `stage=stats event_id=… duration_ms=… fallback=yes|no`.
+
+```bash
+# Replay a match through the Stats Agent and print the final snapshot
+.venv/bin/python -m deepkick.stats tests/fixtures/replay_ASH-CAL-42.jsonl
+```
+
+**Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs and passes each event to `StatsAgent.update`.
