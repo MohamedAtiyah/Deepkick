@@ -18,6 +18,8 @@ cp .env.example .env   # then fill in the values
 .venv/bin/python -m pytest
 ```
 
+GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs the same tests on Python 3.11 for every push and pull request.
+
 ## 1. Ingest: match simulator
 
 [`deepkick/simulator.py`](deepkick/simulator.py) plays the 90-minute fixture from `data/league.json` and emits about 1,100 events (`match_metadata`, `pass`, `shot`, `tackle`, `possession_change`, `pressure_event`, `player_run`) that follow the event contract in [`deepkick/contracts.py`](deepkick/contracts.py).
@@ -46,3 +48,41 @@ cp .env.example .env   # then fill in the values
 ```bash
 .venv/bin/python -m deepkick.simulator --seed 42 --out tests/fixtures/replay_ASH-CAL-42.jsonl
 ```
+
+## 2. Interpret: Stats Agent and moment detector
+
+### Stats Agent
+
+[`deepkick/stats.py`](deepkick/stats.py) folds each event into running team and player stats. It is pure Python and makes no model calls. Its `snapshot()` is the match state that the Narrative Agent is allowed to quote, so every number in it is already rounded.
+
+- **Team stats:** goals, shots, shots on target, xG, passes and pass accuracy, tackles won, pressures won, and possession in seconds and as a percentage. Possession time goes to the team that held the ball between two events.
+- **Player stats:** actions, passes, shots, goals, xG, tackles, pressures and distance covered by runs.
+- **Failure recovery:** events are validated against the contract. A malformed event is skipped, and a redelivered event (Event Hubs delivers at least once) is ignored by `event_id`. Neither changes the state, and both are logged with `fallback=yes`.
+- **Logging:** each handoff logs `stage=stats event_id=… duration_ms=… fallback=yes|no`.
+
+```bash
+# Replay a match through the Stats Agent and print the final snapshot
+.venv/bin/python -m deepkick.stats tests/fixtures/replay_ASH-CAL-42.jsonl
+```
+
+### Moment detector
+
+[`deepkick/moments.py`](deepkick/moments.py) looks at each event the Stats Agent accepted, plus the snapshot taken after it, and flags the moments worth an overlay. It is pure Python and makes no model calls.
+
+| Moment | When | Priority |
+|---|---|---|
+| `goal` | any goal, labelled `opener`, `equaliser`, `go_ahead`, `extends_lead` or `pulls_back` | 3 |
+| `full_time` | final whistle | 3 |
+| `big_chance` | a missed shot with xG ≥ 0.2 | 2 |
+| `pressure_spell` | a team's third shot within 5 minutes (at most once per 10 minutes per team) | 2 |
+| `half_time` | half-time whistle | 2 |
+| `high_press_win` | a successful press at least 75 m up the pitch | 1 |
+
+Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, player, priority, facts`. `facts` copies numbers from the event and the Stats Agent snapshot and nothing else, so the Narrative Agent can only quote real match state. Each handoff logs `stage=moments event_id=… moments=… duration_ms=… fallback=no`.
+
+```bash
+# Print the moments of a replayed match as JSON lines
+.venv/bin/python -m deepkick.moments tests/fixtures/replay_ASH-CAL-42.jsonl
+```
+
+**Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs, calls `StatsAgent.update` and then `MomentDetector.detect` for each event, and sends the moments to the Narrative Agent.
