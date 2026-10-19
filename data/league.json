@@ -1,0 +1,473 @@
+{
+  "league": "Deepkick Fictional League",
+  "clubs": [
+    {
+      "id": "ASH",
+      "name": "Ashvale Wanderers",
+      "short_name": "ASH",
+      "city": "Ashvale",
+      "stadium": "Larkspur Park",
+      "squad": [
+        {
+          "id": "ASH01",
+          "name": "Halvard Grimsdyke",
+          "position": "GK",
+          "number": 1
+        },
+        {
+          "id": "ASH02",
+          "name": "Galen Stillwater",
+          "position": "DF",
+          "number": 2
+        },
+        {
+          "id": "ASH04",
+          "name": "Gideon Ashgrove",
+          "position": "DF",
+          "number": 4
+        },
+        {
+          "id": "ASH05",
+          "name": "Joss Mossington",
+          "position": "DF",
+          "number": 5
+        },
+        {
+          "id": "ASH03",
+          "name": "Joss Rookwell",
+          "position": "DF",
+          "number": 3
+        },
+        {
+          "id": "ASH06",
+          "name": "Corin Blackwen",
+          "position": "MF",
+          "number": 6
+        },
+        {
+          "id": "ASH08",
+          "name": "Arlo Ostrander",
+          "position": "MF",
+          "number": 8
+        },
+        {
+          "id": "ASH10",
+          "name": "Halvard Elsworthy",
+          "position": "MF",
+          "number": 10
+        },
+        {
+          "id": "ASH07",
+          "name": "Gideon Oakenshaw",
+          "position": "FW",
+          "number": 7
+        },
+        {
+          "id": "ASH09",
+          "name": "Arlo Rookwell",
+          "position": "FW",
+          "number": 9
+        },
+        {
+          "id": "ASH11",
+          "name": "Ulric Yarrowfield",
+          "position": "FW",
+          "number": 11
+        }
+      ]
+    },
+    {
+      "id": "CAL",
+      "name": "Calderbrook Athletic",
+      "short_name": "CAL",
+      "city": "Calderbrook",
+      "stadium": "The Millrace",
+      "squad": [
+        {
+          "id": "CAL01",
+          "name": "Zeb Corrigan-Vale",
+          "position": "GK",
+          "number": 1
+        },
+        {
+          "id": "CAL02",
+          "name": "Wystan Ironsby",
+          "position": "DF",
+          "number": 2
+        },
+        {
+          "id": "CAL04",
+          "name": "Yorick Stillwater",
+          "position": "DF",
+          "number": 4
+        },
+        {
+          "id": "CAL05",
+          "name": "Emeric Hethering",
+          "position": "DF",
+          "number": 5
+        },
+        {
+          "id": "CAL03",
+          "name": "Fenn Wrexley",
+          "position": "DF",
+          "number": 3
+        },
+        {
+          "id": "CAL06",
+          "name": "Ivo Elsworthy",
+          "position": "MF",
+          "number": 6
+        },
+        {
+          "id": "CAL08",
+          "name": "Soren Pendleford",
+          "position": "MF",
+          "number": 8
+        },
+        {
+          "id": "CAL10",
+          "name": "Jory Fallowmere",
+          "position": "MF",
+          "number": 10
+        },
+        {
+          "id": "CAL07",
+          "name": "Bram Jessamy",
+          "position": "FW",
+          "number": 7
+        },
+        {
+          "id": "CAL09",
+          "name": "Xander Pendleford",
+          "position": "FW",
+          "number": 9
+        },
+        {
+          "id": "CAL11",
+          "name": "Bastien Ostrander",
+          "position": "FW",
+          "number": 11
+        }
+      ]
+    },
+    {
+      "id": "DUS",
+      "name": "Duskmere Town",
+      "short_name": "DUS",
+      "city": "Duskmere",
+      "stadium": "Heronfield",
+      "squad": [
+        {
+          "id": "DUS01",
+          "name": "Zeb Wrexley",
+          "position": "GK",
+          "number": 1
+        },
+        {
+          "id": "DUS02",
+          "name": "Florin Ravensby",
+          "position": "DF",
+          "number": 2
+        },
+        {
+          "id": "DUS04",
+          "name": "Bastien Stillwater",
+          "position": "DF",
+          "number": 4
+        },
+        {
+          "id": "DUS05",
+          "name": "Florin Larchmont",
+          "position": "DF",
+          "number": 5
+        },
+        {
+          "id": "DUS03",
+          "name": "Hollis Corrigan-Vale",
+          "position": "DF",
+          "number": 3
+        },
+        {
+          "id": "DUS06",
+          "name": "Alder Quarrington",
+          "position": "MF",
+          "number": 6
+        },
+        {
+          "id": "DUS08",
+          "name": "Galen Thornaby",
+          "position": "MF",
+          "number": 8
+        },
+        {
+          "id": "DUS10",
+          "name": "Bram Ashgrove",
+          "position": "MF",
+          "number": 10
+        },
+        {
+          "id": "DUS07",
+          "name": "Idris Thessaly",
+          "position": "FW",
+          "number": 7
+        },
+        {
+          "id": "DUS09",
+          "name": "Hollis Pellow",
+          "position": "FW",
+          "number": 9
+        },
+        {
+          "id": "DUS11",
+          "name": "Bastien Quarrington",
+          "position": "FW",
+          "number": 11
+        }
+      ]
+    },
+    {
+      "id": "KES",
+      "name": "Kestrel Bay",
+      "short_name": "KES",
+      "city": "Kestrel Bay",
+      "stadium": "Saltmarsh Arena",
+      "squad": [
+        {
+          "id": "KES01",
+          "name": "Jory Quarrington",
+          "position": "GK",
+          "number": 1
+        },
+        {
+          "id": "KES02",
+          "name": "Orrin Ravensby",
+          "position": "DF",
+          "number": 2
+        },
+        {
+          "id": "KES04",
+          "name": "Dace Quarrington",
+          "position": "DF",
+          "number": 4
+        },
+        {
+          "id": "KES05",
+          "name": "Ivo Corrigan-Vale",
+          "position": "DF",
+          "number": 5
+        },
+        {
+          "id": "KES03",
+          "name": "Joss Larchmont",
+          "position": "DF",
+          "number": 3
+        },
+        {
+          "id": "KES06",
+          "name": "Tamsin Wrexley",
+          "position": "MF",
+          "number": 6
+        },
+        {
+          "id": "KES08",
+          "name": "Galen Quarrington",
+          "position": "MF",
+          "number": 8
+        },
+        {
+          "id": "KES10",
+          "name": "Zeb Nettlefold",
+          "position": "MF",
+          "number": 10
+        },
+        {
+          "id": "KES07",
+          "name": "Mattis Elsworthy",
+          "position": "FW",
+          "number": 7
+        },
+        {
+          "id": "KES09",
+          "name": "Rafe Varnell",
+          "position": "FW",
+          "number": 9
+        },
+        {
+          "id": "KES11",
+          "name": "Caius Tunstock",
+          "position": "FW",
+          "number": 11
+        }
+      ]
+    },
+    {
+      "id": "RAV",
+      "name": "Ravenholt Albion",
+      "short_name": "RAV",
+      "city": "Ravenholt",
+      "stadium": "Corvid Lane",
+      "squad": [
+        {
+          "id": "RAV01",
+          "name": "Dace Thornaby",
+          "position": "GK",
+          "number": 1
+        },
+        {
+          "id": "RAV02",
+          "name": "Florin Jessamy",
+          "position": "DF",
+          "number": 2
+        },
+        {
+          "id": "RAV04",
+          "name": "Mattis Corrigan-Vale",
+          "position": "DF",
+          "number": 4
+        },
+        {
+          "id": "RAV05",
+          "name": "Florin Pendleford",
+          "position": "DF",
+          "number": 5
+        },
+        {
+          "id": "RAV03",
+          "name": "Galen Rookwell",
+          "position": "DF",
+          "number": 3
+        },
+        {
+          "id": "RAV06",
+          "name": "Bastien Wrexley",
+          "position": "MF",
+          "number": 6
+        },
+        {
+          "id": "RAV08",
+          "name": "Caius Elsworthy",
+          "position": "MF",
+          "number": 8
+        },
+        {
+          "id": "RAV10",
+          "name": "Ulric Pendleford",
+          "position": "MF",
+          "number": 10
+        },
+        {
+          "id": "RAV07",
+          "name": "Galen Corrigan-Vale",
+          "position": "FW",
+          "number": 7
+        },
+        {
+          "id": "RAV09",
+          "name": "Corin Vexley",
+          "position": "FW",
+          "number": 9
+        },
+        {
+          "id": "RAV11",
+          "name": "Emeric Dunmarrow",
+          "position": "FW",
+          "number": 11
+        }
+      ]
+    },
+    {
+      "id": "ELD",
+      "name": "Elderwick FC",
+      "short_name": "ELD",
+      "city": "Elderwick",
+      "stadium": "Bramble Road",
+      "squad": [
+        {
+          "id": "ELD01",
+          "name": "Gideon Wendlebury",
+          "position": "GK",
+          "number": 1
+        },
+        {
+          "id": "ELD02",
+          "name": "Alder Tunstock",
+          "position": "DF",
+          "number": 2
+        },
+        {
+          "id": "ELD04",
+          "name": "Corin Varnell",
+          "position": "DF",
+          "number": 4
+        },
+        {
+          "id": "ELD05",
+          "name": "Fenn Varnell",
+          "position": "DF",
+          "number": 5
+        },
+        {
+          "id": "ELD03",
+          "name": "Corin Underhay",
+          "position": "DF",
+          "number": 3
+        },
+        {
+          "id": "ELD06",
+          "name": "Fenn Wendlebury",
+          "position": "MF",
+          "number": 6
+        },
+        {
+          "id": "ELD08",
+          "name": "Pell Ravensby",
+          "position": "MF",
+          "number": 8
+        },
+        {
+          "id": "ELD10",
+          "name": "Caius Underhay",
+          "position": "MF",
+          "number": 10
+        },
+        {
+          "id": "ELD07",
+          "name": "Rafe Ironsby",
+          "position": "FW",
+          "number": 7
+        },
+        {
+          "id": "ELD09",
+          "name": "Jory Varnell",
+          "position": "FW",
+          "number": 9
+        },
+        {
+          "id": "ELD11",
+          "name": "Ulric Rookwell",
+          "position": "FW",
+          "number": 11
+        }
+      ]
+    }
+  ],
+  "referees": [
+    {
+      "id": "REF1",
+      "name": "Ansel Grimward"
+    },
+    {
+      "id": "REF2",
+      "name": "Bettany Corlew"
+    },
+    {
+      "id": "REF3",
+      "name": "Cyprian Holloway-Fenn"
+    },
+    {
+      "id": "REF4",
+      "name": "Delphine Marchbank"
+    }
+  ]
+}
