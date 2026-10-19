@@ -47,7 +47,9 @@ cp .env.example .env   # then fill in the values
 .venv/bin/python -m deepkick.simulator --seed 42 --out tests/fixtures/replay_ASH-CAL-42.jsonl
 ```
 
-## 2. Interpret: Stats Agent
+## 2. Interpret: Stats Agent and moment detector
+
+### Stats Agent
 
 [`deepkick/stats.py`](deepkick/stats.py) folds each event into running team and player stats. It is pure Python and makes no model calls. Its `snapshot()` is the match state that the Narrative Agent is allowed to quote, so every number in it is already rounded.
 
@@ -61,4 +63,24 @@ cp .env.example .env   # then fill in the values
 .venv/bin/python -m deepkick.stats tests/fixtures/replay_ASH-CAL-42.jsonl
 ```
 
-**Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs and passes each event to `StatsAgent.update`.
+### Moment detector
+
+[`deepkick/moments.py`](deepkick/moments.py) looks at each event the Stats Agent accepted, plus the snapshot taken after it, and flags the moments worth an overlay. It is pure Python and makes no model calls.
+
+| Moment | When | Priority |
+|---|---|---|
+| `goal` | any goal, labelled `opener`, `equaliser`, `go_ahead`, `extends_lead` or `pulls_back` | 3 |
+| `full_time` | final whistle | 3 |
+| `big_chance` | a missed shot with xG ≥ 0.2 | 2 |
+| `pressure_spell` | a team's third shot within 5 minutes (at most once per 10 minutes per team) | 2 |
+| `half_time` | half-time whistle | 2 |
+| `high_press_win` | a successful press at least 75 m up the pitch | 1 |
+
+Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, player, priority, facts`. `facts` copies numbers from the event and the Stats Agent snapshot and nothing else, so the Narrative Agent can only quote real match state. Each handoff logs `stage=moments event_id=… moments=… duration_ms=… fallback=no`.
+
+```bash
+# Print the moments of a replayed match as JSON lines
+.venv/bin/python -m deepkick.moments tests/fixtures/replay_ASH-CAL-42.jsonl
+```
+
+**Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs, calls `StatsAgent.update` and then `MomentDetector.detect` for each event, and sends the moments to the Narrative Agent.
