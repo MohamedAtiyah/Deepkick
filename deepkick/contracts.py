@@ -11,6 +11,7 @@ EVENT_FIELDS = frozenset(
      "player", "coordinates", "payload", "context"}
 )
 PITCH_M = {"x": 105, "y": 68}  # pitch length and width in metres
+SHOT_SPEED_KMH = (60, 130)  # realistic range for a struck shot
 _CLOCK = re.compile(r"^\d{2,3}:[0-5]\d$")
 
 
@@ -46,3 +47,14 @@ def validate_event(event: dict[str, Any]) -> None:
         raise ValueError("context must have score, possession_team, pressure_index")
     if not 0 <= ctx["pressure_index"] <= 1:
         raise ValueError(f"pressure_index out of range: {ctx['pressure_index']!r}")
+
+    payload = event["payload"]
+    if event["event_type"] == "pass" and not _in_range(payload.get("difficulty"), 0, 1):
+        raise ValueError(f"pass difficulty must be 0..1, got {payload.get('difficulty')!r}")
+    if event["event_type"] == "shot" and not _in_range(payload.get("speed_kmh"), *SHOT_SPEED_KMH):
+        raise ValueError(f"shot speed_kmh must be {SHOT_SPEED_KMH[0]}..{SHOT_SPEED_KMH[1]}, "
+                         f"got {payload.get('speed_kmh')!r}")
+
+
+def _in_range(value: Any, low: float, high: float) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and low <= value <= high

@@ -22,11 +22,22 @@ def test_every_replay_event_is_valid(replay):
     (lambda e: e.update(coordinates={"x": 106, "y": 30}), "coordinates"),
     (lambda e: e.update(coordinates={"x": 50, "y": 69}), "coordinates"),
     (lambda e: e["context"].update(pressure_index=1.5), "pressure_index"),
+    (lambda e: e["payload"].update(difficulty=1.2), "difficulty"),
+    (lambda e: e["payload"].update(difficulty=True), "difficulty"),
+    (lambda e: e["payload"].pop("difficulty"), "difficulty"),
 ])
 def test_rejects_broken_events(replay, mutate, message):
     event = copy.deepcopy(next(e for e in replay if e["event_type"] == "pass"))
     mutate(event)
     with pytest.raises(ValueError, match=message):
+        validate_event(event)
+
+
+@pytest.mark.parametrize("speed", [None, 59.9, 130.1, "fast"])
+def test_rejects_shot_without_realistic_speed(replay, speed):
+    event = copy.deepcopy(next(e for e in replay if e["event_type"] == "shot"))
+    event["payload"]["speed_kmh"] = speed
+    with pytest.raises(ValueError, match="speed_kmh"):
         validate_event(event)
 
 

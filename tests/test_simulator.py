@@ -62,6 +62,33 @@ def test_players_act_near_their_formation_slot(replay):
     assert mean_x("RST") > mean_x("RCB") + 15
 
 
+def test_harder_passes_are_longer_and_fail_more(replay):
+    passes = [e["payload"] for e in replay if e["event_type"] == "pass"]
+    hard = [p for p in passes if p["difficulty"] >= 0.7]
+    easy = [p for p in passes if p["difficulty"] < 0.3]
+    mean = lambda ps, f: sum(f(p) for p in ps) / len(ps)
+    assert hard and easy
+    assert mean(hard, lambda p: p["length_m"]) > mean(easy, lambda p: p["length_m"])
+    assert mean(hard, lambda p: p["completed"]) < mean(easy, lambda p: p["completed"]) - 0.15
+
+
+def test_longer_shots_are_struck_harder(replay):
+    shots = sorted((e["payload"]["distance_m"], e["payload"]["speed_kmh"]) for e in replay if e["event_type"] == "shot")
+    half = len(shots) // 2
+    assert sum(s for _, s in shots[half:]) / (len(shots) - half) > sum(s for _, s in shots[:half]) / half
+
+
+def test_starters_cover_realistic_distances(replay):
+    covered = {}
+    for e in replay:
+        if e["event_type"] == "player_run":
+            key = (e["player"]["id"], e["player"]["position"])
+            covered[key] = covered.get(key, 0) + e["payload"]["distance_m"]
+    assert len(covered) == 22
+    for (_, position), metres in covered.items():
+        assert (4_500 if position == "GK" else 9_000) < metres < (6_000 if position == "GK" else 11_500)
+
+
 def test_write_replay_round_trips(replay):
     buf = io.StringIO()
     write_replay(replay[:5], buf)

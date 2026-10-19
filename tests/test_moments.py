@@ -5,8 +5,9 @@ import logging
 
 import pytest
 
-from deepkick.moments import (BIG_CHANCE_XG, HIGH_PRESS_X, MOMENT_FIELDS, SPELL_COOLDOWN_S, SPELL_SHOTS,
-                              SPELL_WINDOW_S, MomentDetector, goal_kind)
+from deepkick.moments import (BIG_CHANCE_XG, DISTANCE_MILESTONES_KM, HIGH_PRESS_X, MOMENT_FIELDS, PASS_MILESTONES,
+                              SPEED_MILESTONE_KMH, SPELL_COOLDOWN_S, SPELL_SHOTS, SPELL_WINDOW_S, SWING_SHARE,
+                              MomentDetector, goal_kind)
 from deepkick.simulator import clock_seconds
 from deepkick.stats import StatsAgent
 
@@ -54,7 +55,8 @@ def test_every_moment_has_the_moment_shape(moments):
 def test_one_goal_moment_per_goal_in_order(replay, moments):
     goals = [e for e in replay if e["event_type"] == "shot" and e["payload"]["outcome"] == "goal"]
     assert [m["event_id"] for m in _of(moments, "goal")] == [e["event_id"] for e in goals]
-    assert [m["facts"]["kind"] for m in _of(moments, "goal")] == ["opener", "equaliser", "go_ahead"]
+    assert [m["facts"]["kind"] for m in _of(moments, "goal")] == [
+        "opener", "extends_lead", "extends_lead", "pulls_back", "pulls_back"]
 
 
 def test_big_chances_are_exactly_the_missed_high_xg_shots(replay, moments):
@@ -85,6 +87,67 @@ def test_pressure_spells_have_enough_shots_and_respect_cooldown(replay, moments)
         last[m["team"]] = clock
 
 
+def test_speed_milestones_are_exactly_the_fast_shots(replay, moments):
+    expected = [e["event_id"] for e in replay
+                if e["event_type"] == "shot" and e["payload"]["speed_kmh"] >= SPEED_MILESTONE_KMH]
+    assert expected
+    assert [m["event_id"] for m in _of(moments, "speed_milestone")] == expected
+
+
+def test_distance_milestones_fire_once_per_player_and_mark(replay, moments):
+    covered, expected = {}, []
+    for e in replay:
+        if e["event_type"] == "player_run":
+            pid = e["player"]["id"]
+            before = covered.get(pid, 0.0)
+            covered[pid] = before + e["payload"]["distance_m"]
+            crossed = [km for km in DISTANCE_MILESTONES_KM if before < km * 1000 <= covered[pid]]
+            if crossed:
+                expected.append((e["event_id"], crossed[-1]))
+    assert {km for _, km in expected} == set(DISTANCE_MILESTONES_KM)
+    assert [(m["event_id"], m["facts"]["milestone_km"]) for m in _of(moments, "distance_milestone")] == expected
+
+
+def test_pass_milestones_match_each_players_pass_count(replay, moments):
+    counts, expected = {}, []
+    for e in replay:
+        if e["event_type"] == "pass":
+            counts[e["player"]["id"]] = counts.get(e["player"]["id"], 0) + 1
+            if counts[e["player"]["id"]] in PASS_MILESTONES:
+                expected.append(e["event_id"])
+    assert [m["event_id"] for m in _of(moments, "pass_milestone")] == expected
+
+
+@pytest.mark.parametrize("passes, fires", [(49, False), (50, True), (51, False), (75, True)])
+def test_pass_milestone_fires_on_the_50th_and_75th_pass(replay, passes, fires):
+    # No seed-42 player reaches 50 passes, so feed a real pass with the player's count set in the snapshot.
+    stats = StatsAgent()
+    event = next(e for e in replay if e["event_type"] == "pass")
+    for e in replay[:replay.index(event) + 1]:
+        stats.update(e)
+    snap = stats.snapshot()
+    snap["players"][event["player"]["id"]].update(passes=passes, passes_completed=passes - 5,
+                                                  pass_accuracy_pct=round(100 * (passes - 5) / passes, 1))
+    found = _of(MomentDetector().detect(event, snap), "pass_milestone")
+    assert bool(found) is fires
+    if fires:
+        assert found[0]["facts"] == {k: snap["players"][event["player"]["id"]][k]
+                                     for k in ("passes", "passes_completed", "pass_accuracy_pct")}
+
+
+def test_momentum_swings_alternate_between_clear_leaders(detected):
+    swings = [(m, snap) for m, snap in detected if m["type"] == "momentum_swing"]
+    assert swings
+    for (m, snap), nxt in zip(swings, swings[1:] + [None]):
+        facts = m["facts"]
+        assert m["team"] == facts["to_team"] != facts["from_team"] and m["player"] is None
+        assert facts["momentum"][m["team"]]["value"] >= SWING_SHARE
+        assert facts["momentum"] == {tid: t["momentum"] for tid, t in snap["teams"].items()}
+        assert facts["window_minutes"] == snap["momentum_window_minutes"]
+        if nxt:
+            assert nxt[0]["facts"]["from_team"] == m["team"]
+
+
 def test_half_and_full_time_fire_once(moments):
     assert [m["match_clock"] for m in _of(moments, "half_time")] == ["45:00"]
     assert [m["match_clock"] for m in _of(moments, "full_time")] == ["90:00"]
@@ -102,6 +165,15 @@ def test_facts_only_quote_numbers_from_the_event_or_snapshot(replay, detected):
         if m["type"] == "goal":
             assert facts["score"] == snap["score"] == event["context"]["score"]
             assert facts["player_goals"] == snap["players"][m["player"]["id"]]["goals"]
+        if m["type"] == "speed_milestone":
+            player, team = snap["players"][m["player"]["id"]], snap["teams"][m["team"]]
+            assert facts == {"speed_kmh": event["payload"]["speed_kmh"], "distance_m": event["payload"]["distance_m"],
+                             "outcome": event["payload"]["outcome"],
+                             "player_top_speed_kmh": player["top_shot_speed_kmh"],
+                             "team_top_speed_kmh": team["top_shot_speed_kmh"]}
+        if m["type"] == "distance_milestone":
+            assert facts["distance_m"] == snap["players"][m["player"]["id"]]["distance_m"]
+            assert facts["distance_m"] >= facts["milestone_km"] * 1000
         if m["type"] in ("half_time", "full_time"):
             assert facts["score"] == snap["score"]
             for tid, t in facts["teams"].items():
