@@ -1,6 +1,7 @@
 """Seeded football match simulator that writes replays or streams events to Azure Event Hubs.
 
-Coordinates are 0-100 on both axes, oriented so the acting team always attacks towards x=100.
+Plays the fixture in data/league.json. Coordinates are metres on a 105 x 68 pitch, oriented so
+the acting team always attacks towards x=105 (the same frame as the formation slots).
 Each event's `context` is the match state after that event.
 """
 
@@ -23,15 +24,9 @@ KICKOFF = datetime(2026, 10, 27, 15, 0, tzinfo=timezone.utc)
 HALF_SECONDS = 45 * 60
 HALF_TIME_BREAK = 15 * 60
 BATCH_SIZE = 200  # ~90 KB per batch, well under the Basic tier 256 KB limit
-
-# Relative chance of each position doing the action.
-DEFEND_W = {"GK": 0, "DF": 6, "MF": 4, "FW": 1}
-RUN_W = {"GK": 0, "DF": 2, "MF": 4, "FW": 5}
-RECEIVE_W = {  # by the third of the pitch the pass lands in
-    0: {"GK": 1, "DF": 6, "MF": 3, "FW": 0},
-    1: {"GK": 0, "DF": 2, "MF": 6, "FW": 2},
-    2: {"GK": 0, "DF": 1, "MF": 4, "FW": 6},
-}
+LENGTH, WIDTH = 105.0, 68.0
+CENTRE = (LENGTH / 2, WIDTH / 2)
+BLOCK_SHIFT = 0.4  # how far outfield players follow the ball up or down the pitch from their slot
 
 log = logging.getLogger("deepkick.simulator")
 
@@ -41,49 +36,67 @@ def load_league(path: Path = LEAGUE_PATH) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def _clamp(v: float, lo: float = 1.0, hi: float = 99.0) -> float:
-    return max(lo, min(hi, v))
+def _clamp(x: float, y: float) -> tuple[float, float]:
+    return max(1.0, min(LENGTH - 1, x)), max(1.0, min(WIDTH - 1, y))
 
 
-def _metres(x0: float, y0: float, x1: float, y1: float) -> float:
-    """Distance on a 105 x 68 m pitch between two 0-100 points."""
-    return math.hypot((x1 - x0) * 1.05, (y1 - y0) * 0.68)
+def _flip(xy: tuple[float, float]) -> tuple[float, float]:
+    """Same point seen from the other team's attacking direction."""
+    return LENGTH - xy[0], WIDTH - xy[1]
 
 
 def _ref(player: dict[str, Any]) -> dict[str, Any]:
     return {"id": player["id"], "name": player["name"], "position": player["position"]}
 
 
+def _xy(xy: tuple[float, float]) -> dict[str, float]:
+    return {"x": round(xy[0], 1), "y": round(xy[1], 1)}
+
+
 class _Match:
     """Mutable state of one simulated match; `run()` returns its events."""
 
-    def __init__(self, league: dict[str, Any], home_id: str, away_id: str, seed: int, kickoff: datetime):
+    def __init__(self, league: dict[str, Any], seed: int, kickoff: datetime):
         clubs = {c["id"]: c for c in league["clubs"]}
+        match = league["match"]
+        home_id, away_id = match["home"], match["away"]
         if home_id == away_id or home_id not in clubs or away_id not in clubs:
-            raise ValueError(f"need two different club ids from {sorted(clubs)}, got {home_id!r}, {away_id!r}")
+            raise ValueError(f"match needs two different club ids from {sorted(clubs)}, got {home_id!r}, {away_id!r}")
         self.rng = random.Random(seed)
         self.seed, self.kickoff = seed, kickoff
         self.home, self.away = clubs[home_id], clubs[away_id]
-        self.referee = self.rng.choice(league["referees"])
+        self.stadium, self.referee = match["stadium"], match["referee"]
         self.match_id = f"{home_id}-{away_id}-{seed}"
         self.events: list[dict[str, Any]] = []
         self.score = {home_id: 0, away_id: 0}
         self.possession = home_id
-        self.carrier = self.home["squad"][0]
-        self.ball = (50.0, 50.0)
+        self.carrier = self.home["starters"][0]
+        self.ball = CENTRE
         self.pressure = 0.0
         self.clock = 0
         self.half = 1
 
-    def squad(self, team: str) -> list[dict[str, Any]]:
-        return self.home["squad"] if team == self.home["id"] else self.away["squad"]
+    def club(self, team: str) -> dict[str, Any]:
+        return self.home if team == self.home["id"] else self.away
 
     def other(self, team: str) -> str:
         return self.away["id"] if team == self.home["id"] else self.home["id"]
 
-    def pick(self, team: str, weights: dict[str, int], exclude: dict[str, Any] | None = None) -> dict[str, Any]:
-        pool = [p for p in self.squad(team) if p is not exclude]
-        return self.rng.choices(pool, [weights[p["position"]] for p in pool])[0]
+    def keeper(self, team: str) -> dict[str, Any]:
+        return next(p for p in self.club(team)["starters"] if p["position"] == "GK")
+
+    def pick_near(self, team: str, xy: tuple[float, float], exclude: dict[str, Any] | None = None,
+                  outfield: bool = False) -> dict[str, Any]:
+        """Pick a starter of `team`, favouring those whose slot is near `xy` (in that team's frame)."""
+        club = self.club(team)
+        pool = [p for p in club["starters"]
+                if p is not exclude and not (outfield and p["position"] == "GK")]
+        weights = []
+        for p in pool:
+            slot = club["formation"]["slots"][p["position"]]
+            sx = slot["x"] if p["position"] == "GK" else slot["x"] + (xy[0] - CENTRE[0]) * BLOCK_SHIFT
+            weights.append(1 / (1 + (math.hypot(sx - xy[0], slot["y"] - xy[1]) / 12) ** 2))
+        return self.rng.choices(pool, weights)[0]
 
     def emit(self, event_type: str, team: str, player: dict[str, Any] | None,
              xy: tuple[float, float] | None, payload: dict[str, Any]) -> None:
@@ -97,7 +110,7 @@ class _Match:
             "event_type": event_type,
             "team": team,
             "player": _ref(player) if player else None,
-            "coordinates": {"x": round(xy[0], 1), "y": round(xy[1], 1)} if xy else None,
+            "coordinates": _xy(xy) if xy else None,
             "payload": payload,
             "context": {"score": dict(self.score), "possession_team": self.possession,
                         "pressure_index": round(self.pressure, 2)},
@@ -108,12 +121,16 @@ class _Match:
         if status == "kickoff":
             payload.update({
                 "seed": self.seed,
-                "home": {k: self.home[k] for k in ("id", "name", "short_name")},
-                "away": {k: self.away[k] for k in ("id", "name", "short_name")},
-                "stadium": self.home["stadium"],
+                "home": {k: self.home[k] for k in ("id", "name", "short_name", "colours", "manager")},
+                "away": {k: self.away[k] for k in ("id", "name", "short_name", "colours", "manager")},
+                "stadium": self.stadium,
                 "referee": self.referee,
-                "lineups": {c["id"]: [_ref(p) | {"number": p["number"]} for p in c["squad"]]
-                            for c in (self.home, self.away)},
+                "lineups": {c["id"]: {
+                    "formation": c["formation"]["name"],
+                    "starters": [_ref(p) | {"number": p["number"],
+                                            "slot": c["formation"]["slots"][p["position"]]} for p in c["starters"]],
+                    "bench": [_ref(p) | {"number": p["number"]} for p in c["bench"]],
+                } for c in (self.home, self.away)},
             })
         self.emit("match_metadata", self.home["id"], None, None, payload)
 
@@ -123,7 +140,7 @@ class _Match:
         self.emit("possession_change", team, player, xy, {"from_team": old, "reason": reason})
 
     def kickoff_to(self, team: str, reason: str) -> None:
-        self.change_possession(team, self.pick(team, {"GK": 0, "DF": 0, "MF": 1, "FW": 3}), (50.0, 50.0), reason)
+        self.change_possession(team, self.pick_near(team, CENTRE, outfield=True), CENTRE, reason)
 
     def run(self) -> list[dict[str, Any]]:
         self.meta("kickoff")
@@ -145,9 +162,8 @@ class _Match:
     def step(self) -> None:
         """Play one on-ball action for the team in possession."""
         att, dfn = self.possession, self.other(self.possession)
-        x, _ = self.ball
         self.pressure *= 0.9
-        shot_chance = max(0.0, (x - 65) / 35 * 0.15)
+        shot_chance = max(0.0, (self.ball[0] - 68) / 37 * 0.15)
         r = self.rng.random()
         if r < shot_chance:
             self.shot(att, dfn)
@@ -162,85 +178,85 @@ class _Match:
 
     def pass_ball(self, att: str, dfn: str) -> None:
         x, y = self.ball
-        nx, ny = _clamp(x + self.rng.gauss(6, 12)), _clamp(y + self.rng.gauss(0, 15))
-        recipient = self.pick(att, RECEIVE_W[min(2, int(nx // 33.4))], exclude=self.carrier)
-        length = _metres(x, y, nx, ny)
-        p_complete = 0.93 - length / 150 - self.pressure * 0.15 - (0.08 if nx > 75 else 0)
+        end = _clamp(x + self.rng.gauss(6.3, 12.6), y + self.rng.gauss(0, 10.2))
+        recipient = self.pick_near(att, end, exclude=self.carrier, outfield=end[0] > 35)
+        length = math.dist(self.ball, end)
+        p_complete = 0.93 - length / 150 - self.pressure * 0.15 - (0.08 if end[0] > 79 else 0)
         completed = self.rng.random() < p_complete
-        self.emit("pass", att, self.carrier, (x, y), {
+        self.emit("pass", att, self.carrier, self.ball, {
             "recipient": {"id": recipient["id"], "name": recipient["name"]},
-            "end": {"x": round(nx, 1), "y": round(ny, 1)},
+            "end": _xy(end),
             "length_m": round(length, 1),
             "completed": completed,
         })
         if completed:
-            self.carrier, self.ball = recipient, (nx, ny)
+            self.carrier, self.ball = recipient, end
         else:
-            self.change_possession(dfn, self.pick(dfn, DEFEND_W), (100 - nx, 100 - ny), "interception")
+            won_at = _flip(end)
+            self.change_possession(dfn, self.pick_near(dfn, won_at), won_at, "interception")
 
     def player_run(self, att: str) -> None:
         x, y = self.ball
-        runner = self.carrier if self.carrier["position"] != "GK" else self.pick(att, RUN_W)
-        nx, ny = _clamp(x + self.rng.uniform(3, 18)), _clamp(y + self.rng.gauss(0, 8))
-        self.emit("player_run", att, runner, (x, y), {
-            "end": {"x": round(nx, 1), "y": round(ny, 1)},
-            "distance_m": round(_metres(x, y, nx, ny), 1),
+        runner = self.carrier if self.carrier["position"] != "GK" else self.pick_near(att, self.ball, outfield=True)
+        end = _clamp(x + self.rng.uniform(3, 19), y + self.rng.gauss(0, 5.4))
+        self.emit("player_run", att, runner, self.ball, {
+            "end": _xy(end),
+            "distance_m": round(math.dist(self.ball, end), 1),
             "with_ball": runner is self.carrier,
         })
-        self.carrier, self.ball = runner, (nx, ny)
+        self.carrier, self.ball = runner, end
 
     def press(self, att: str, dfn: str) -> None:
-        x, y = self.ball
-        presser = self.pick(dfn, DEFEND_W)
+        at = _flip(self.ball)
+        presser = self.pick_near(dfn, at)
         self.pressure = min(1.0, self.pressure + 0.25)
         won = self.rng.random() < 0.2 + self.pressure * 0.2
-        self.emit("pressure_event", dfn, presser, (100 - x, 100 - y), {
+        self.emit("pressure_event", dfn, presser, at, {
             "target": {"id": self.carrier["id"], "name": self.carrier["name"]},
             "success": won,
         })
         if won:
-            self.change_possession(dfn, presser, (100 - x, 100 - y), "pressure")
+            self.change_possession(dfn, presser, at, "pressure")
 
     def tackle(self, att: str, dfn: str) -> None:
-        x, y = self.ball
-        tackler = self.pick(dfn, DEFEND_W)
+        at = _flip(self.ball)
+        tackler = self.pick_near(dfn, at)
         self.pressure = min(1.0, self.pressure + 0.15)
         won = self.rng.random() < 0.6
-        self.emit("tackle", dfn, tackler, (100 - x, 100 - y), {
+        self.emit("tackle", dfn, tackler, at, {
             "opponent": {"id": self.carrier["id"], "name": self.carrier["name"]},
             "won": won,
         })
         if won:
-            self.change_possession(dfn, tackler, (100 - x, 100 - y), "tackle")
+            self.change_possession(dfn, tackler, at, "tackle")
 
     def shot(self, att: str, dfn: str) -> None:
         x, y = self.ball
-        distance = _metres(x, y, 100, 50)
+        distance = math.dist(self.ball, (LENGTH, CENTRE[1]))
         xg = round(min(0.95, 0.7 * math.exp(-distance / 9)), 3)
         r = self.rng.random()
         outcome = ("goal" if r < xg else
                    self.rng.choices(["blocked", "saved", "off_target"], [25, 35, 40])[0])
         if outcome == "goal":
             self.score[att] += 1
-        self.emit("shot", att, self.carrier, (x, y),
+        self.emit("shot", att, self.carrier, self.ball,
                   {"xg": xg, "distance_m": round(distance, 1), "outcome": outcome})
-        keeper = self.squad(dfn)[0]
         if outcome == "goal":
             self.kickoff_to(dfn, "goal")
         elif outcome == "saved":
-            self.change_possession(dfn, keeper, (6.0, 50.0), "save")
+            self.change_possession(dfn, self.keeper(dfn), (6.0, CENTRE[1]), "save")
         elif outcome == "off_target":
-            self.change_possession(dfn, keeper, (5.0, 50.0), "out_of_play")
+            self.change_possession(dfn, self.keeper(dfn), (5.5, CENTRE[1]), "out_of_play")
         elif self.rng.random() < 0.5:  # blocked: rebound falls back to the attackers
-            self.ball = (_clamp(x - 10), y)
+            self.ball = _clamp(x - 10.5, y)
         else:
-            self.change_possession(dfn, self.pick(dfn, DEFEND_W), (100 - x, 100 - y), "block")
+            won_at = _flip(self.ball)
+            self.change_possession(dfn, self.pick_near(dfn, won_at), won_at, "block")
 
 
-def simulate_match(home_id: str, away_id: str, seed: int,
-                   league: dict[str, Any] | None = None, kickoff: datetime = KICKOFF) -> list[dict[str, Any]]:
-    """Return every event of one match; the same arguments always give the same events."""
-    return _Match(league or load_league(), home_id, away_id, seed, kickoff).run()
+def simulate_match(seed: int, league: dict[str, Any] | None = None, kickoff: datetime = KICKOFF) -> list[dict[str, Any]]:
+    """Return every event of the league file's fixture; the same seed always gives the same events."""
+    return _Match(league or load_league(), seed, kickoff).run()
 
 
 def clock_seconds(event: dict[str, Any]) -> int:
@@ -282,8 +298,6 @@ def send_events(events: list[dict[str, Any]], producer: Any, speed: float = 0.0)
 def main(argv: list[str] | None = None) -> None:
     """CLI: simulate a match, then print it, write a replay file, or stream it to Event Hubs."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--home", default="ASH", help="home club id from data/league.json")
-    parser.add_argument("--away", default="CAL", help="away club id from data/league.json")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out", type=Path, help="write a JSONL replay file here")
     parser.add_argument("--send", action="store_true", help="stream to Azure Event Hubs (reads .env)")
@@ -293,7 +307,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
     try:
-        events = simulate_match(args.home, args.away, args.seed)
+        events = simulate_match(args.seed)
     except ValueError as exc:
         parser.error(str(exc))
     if args.out:

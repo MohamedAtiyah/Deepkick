@@ -19,7 +19,8 @@ def test_every_replay_event_is_valid(replay):
     (lambda e: e.update(half=3), "half"),
     (lambda e: e.update(match_clock="5:00"), "match_clock"),
     (lambda e: e.update(player=None), "player"),
-    (lambda e: e.update(coordinates={"x": 101, "y": 50}), "coordinates"),
+    (lambda e: e.update(coordinates={"x": 106, "y": 30}), "coordinates"),
+    (lambda e: e.update(coordinates={"x": 50, "y": 69}), "coordinates"),
     (lambda e: e["context"].update(pressure_index=1.5), "pressure_index"),
 ])
 def test_rejects_broken_events(replay, mutate, message):

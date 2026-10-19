@@ -10,6 +10,7 @@ EVENT_FIELDS = frozenset(
     {"event_id", "match_id", "timestamp", "match_clock", "half", "event_type", "team",
      "player", "coordinates", "payload", "context"}
 )
+PITCH_M = {"x": 105, "y": 68}  # pitch length and width in metres
 _CLOCK = re.compile(r"^\d{2,3}:[0-5]\d$")
 
 
@@ -36,9 +37,9 @@ def validate_event(event: dict[str, Any]) -> None:
             raise ValueError("player must have id, name, position")
     if event["event_type"] != "match_metadata" or coords is not None:
         if not isinstance(coords, dict) or not all(
-            isinstance(coords.get(k), (int, float)) and 0 <= coords[k] <= 100 for k in ("x", "y")
+            isinstance(coords.get(k), (int, float)) and 0 <= coords[k] <= limit for k, limit in PITCH_M.items()
         ):
-            raise ValueError(f"coordinates must be x,y in 0..100, got {coords!r}")
+            raise ValueError(f"coordinates must be metres within x 0..105, y 0..68, got {coords!r}")
 
     ctx = event["context"]
     if not isinstance(ctx, dict) or not {"score", "possession_team", "pressure_index"} <= ctx.keys():

@@ -1,5 +1,6 @@
 """Tests for the seeded match simulator and its Event Hubs sender."""
 
+import copy
 import io
 import json
 
@@ -9,18 +10,19 @@ from deepkick.simulator import clock_seconds, load_league, send_events, simulate
 
 
 def test_same_seed_reproduces_the_replay_file(replay):
-    assert simulate_match("ASH", "CAL", 42) == replay
+    assert simulate_match(42) == replay
 
 
 def test_different_seed_gives_a_different_match():
-    assert simulate_match("ASH", "CAL", 1) != simulate_match("ASH", "CAL", 2)
+    assert simulate_match(1) != simulate_match(2)
 
 
-def test_unknown_or_same_club_is_rejected():
+@pytest.mark.parametrize("home, away", [("ASH", "ASH"), ("ASH", "NOPE")])
+def test_fixture_with_unknown_or_same_club_is_rejected(home, away):
+    league = copy.deepcopy(load_league())
+    league["match"].update(home=home, away=away)
     with pytest.raises(ValueError):
-        simulate_match("ASH", "ASH", 1)
-    with pytest.raises(ValueError):
-        simulate_match("ASH", "NOPE", 1)
+        simulate_match(1, league)
 
 
 def test_ids_unique_and_clock_never_goes_back(replay):
@@ -44,11 +46,20 @@ def test_final_score_equals_goals_scored(replay):
 
 
 def test_players_come_from_the_league_squads(replay):
-    league_ids = {p["id"] for c in load_league()["clubs"] for p in c["squad"]}
+    starters = {p["id"]: p["position"] for c in load_league()["clubs"] for p in c["starters"]}
     for e in replay:
         if e["player"]:
-            assert e["player"]["id"] in league_ids
+            assert starters[e["player"]["id"]] == e["player"]["position"]
             assert e["player"]["id"].startswith(e["team"])
+
+
+def test_players_act_near_their_formation_slot(replay):
+    # Strikers should, on average, touch the ball much further upfield than centre-backs.
+    def mean_x(position):
+        xs = [e["coordinates"]["x"] for e in replay
+              if e["event_type"] == "pass" and e["team"] == "ASH" and e["player"]["position"] == position]
+        return sum(xs) / len(xs)
+    assert mean_x("RST") > mean_x("RCB") + 15
 
 
 def test_write_replay_round_trips(replay):
