@@ -95,3 +95,30 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
 ```
 
 **Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs, calls `StatsAgent.update` and then `MomentDetector.detect` for each event, and sends the moments to the Narrative Agent.
+
+## 3. Explain: Narrative Agent
+
+[`deepkick/agents/narrative.py`](deepkick/agents/narrative.py) takes one moment from the moment detector and the current Stats Agent snapshot, and says why the moment matters. It returns:
+
+| Field | Content |
+|---|---|
+| `headline` | at most 70 characters |
+| `why_it_matters` | one or two sentences |
+| `theme` | `control`, `chaos`, `pressure_shift`, `rhythm`, `milestone` or `result` |
+| `evidence` | the stats it used, as `{"stat": …, "value": …}` |
+| `fallback` | `true` if the template wrote it instead of the model |
+
+- **Model input:** the moment (type, clock, team, player name and position, facts) and a trimmed snapshot (score, clock, pressure index, team stats with momentum, and the moment's player). Event and player ids are left out.
+- **No invented numbers:** the prompt tells the model to cite only numbers in that input, copied exactly. The reply is then checked. Every number in the headline, `why_it_matters` and `evidence` must appear in the input (the match clock counts too), and each evidence item must name a stat that really holds that value. A reply that fails, or has the wrong shape, length or theme, is rejected.
+- **Model call:** Chat Completions with JSON output, `reasoning_effort="low"` and `max_completion_tokens=1500` (reasoning tokens count against that cap).
+- **Failure recovery:** each call has a 30-second timeout and one retry, so the worst case is about a minute before the template is used. Reasoning models such as gpt-5-mini answer a one-word probe in about 3 s but need much longer than 4 s on a real moment. After a timeout, an API error or a rejected reply on both tries, the agent returns a template narrative built straight from the moment facts, with `fallback: true`. It never raises. Every moment type has a template, and the tests run every template through the same number check as the model.
+- **Logging:** at startup the agent logs the base URL path and the deployment once (`stage=narrative foundry base_path=… deployment=…`), never the key or host. Each handoff logs `stage=narrative event_id=… duration_ms=… fallback=yes|no`. Each failed attempt is logged with its reason.
+
+```bash
+# Explain the first 5 moments of priority 2 or more (template only if FOUNDRY_* is unset)
+.venv/bin/python -m deepkick.agents.narrative tests/fixtures/replay_ASH-CAL-42.jsonl --limit 5
+```
+
+**Azure service:** a Microsoft Foundry reasoning model deployment (gpt-5-mini; `reasoning_effort` is sent on every call, which non-reasoning models such as gpt-4o-mini reject), called with the [`openai`](https://pypi.org/project/openai/) SDK on the resource's `/openai/v1` endpoint with an API key, as Microsoft's [Foundry SDK guide](https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview) recommends for Chat Completions. Set `FOUNDRY_ENDPOINT`, `FOUNDRY_MODEL_DEPLOYMENT` and `FOUNDRY_API_KEY` in `.env`. `FOUNDRY_ENDPOINT` can be a bare host (`https://<resource>.openai.azure.com`), a project endpoint (`https://<resource>.services.ai.azure.com/api/projects/<name>`) or a full target URI copied from the portal. The agent keeps only the scheme, host and optional `/api/projects/<name>`, then adds `/openai/v1/`, so a pasted `/openai/.../chat/completions?api-version=…` or `/responses` path can't be doubled. If a setting is missing or the endpoint isn't an http(s) URL, every narrative uses the template.
+
+**Tests:** [`tests/test_narrative.py`](tests/test_narrative.py) replaces the model client with a fake. It covers a good reply, invented numbers in text and in evidence, a timeout, endpoint normalisation (bare host, project endpoint and target URIs), player names in the template text, malformed JSON and bad fields, a retry that recovers, missing settings, and the template for every moment type.
