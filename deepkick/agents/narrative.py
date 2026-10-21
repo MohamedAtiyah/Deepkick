@@ -209,7 +209,7 @@ def template_narrative(moment: dict[str, Any], snapshot: dict[str, Any]) -> dict
                f"minutes, with {_count(m['shots'], 'shot')}, {m['final_third_entries']} final-third entries "
                f"and {m['possession_pct']}% of the ball.")
     elif kind == "speed_milestone":
-        headline = f"{player} hits a {f['speed_kmh']} km/h strike"
+        headline = f"{player} fires a shot at {f['speed_kmh']} km/h"
         why = (f"The shot from {f['distance_m']} m was {_OUTCOME[f['outcome']]}. "
                f"{_possessive(team)} fastest shot so far is {f['team_top_speed_kmh']} km/h.")
     elif kind == "distance_milestone":

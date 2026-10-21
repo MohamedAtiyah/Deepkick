@@ -5,14 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any
 
-from deepkick.agents.narrative import (_NUMBER, HEADLINE_MAX, POSITION_WORDS, TIMEOUT_S, _clip, _possessive,
+from deepkick.agents.narrative import (_OUTCOME, HEADLINE_MAX, POSITION_WORDS, TIMEOUT_S, _clip, _count, _possessive,
                                        allowed_numbers, ask_with_retry, check_numbers, client_from_env,
-                                       spell_out_positions)
+                                       spell_out_positions, template_narrative)
 from deepkick.contracts import PERSONAS, validate_overlay
 from deepkick.simulator import clock_seconds, load_league
 
@@ -26,9 +25,6 @@ OVERLAY_PRIORITY = {
 }
 LOW_PRIORITY = 2  # at or below this, a moment for the viewer's non-favourite club is shown as priority 1
 VERSION_KEYS = ("headline", "detail", "why")
-CASUAL_MAX_NUMBERS = 2  # a score such as 1-0 counts as one number, a clock time such as 13:52 as none
-_TIME = re.compile(r"\b\d{1,3}:\d{2}\b")
-_SCORE = re.compile(r"\b\d+ ?[-–] ?\d+\b")
 
 SYSTEM_PROMPT = f"""You rewrite one football broadcast caption for three kinds of viewer.
 
@@ -36,8 +32,7 @@ You get a JSON object with `moment` (type, clock, team, player and `facts`) and 
 with the `evidence` numbers it used). Reply with one JSON object and nothing else, with exactly the keys
 "analyst", "casual" and "player". Each is an object with exactly "headline", "detail" and "why".
 - analyst: precise, and includes the key numbers from `narrative.evidence`.
-- casual: plain words with no jargon or abbreviations (say "expected goals", not xG), and at most two numbers in
-  total. A score such as 1-0 counts as one number.
+- casual: plain words with no jargon or abbreviations (say "expected goals", not xG), and at most one or two numbers.
 - player: centred on `moment.player`, with their full name exactly as given in the headline.
   If `moment.player` is null, centre it on `moment.team` instead.
 
@@ -52,19 +47,6 @@ Rules for all three:
 - Write clubs and players exactly as given, full names with their spaces. Refer to a player by name or "they".
 """
 
-_CASUAL_HEADLINE = {
-    "goal": "Goal for {team}!", "full_time": "Full-time", "half_time": "Half-time", "big_chance": "So close for {who}",
-    "momentum_swing": "{team} take control", "pressure_spell": "{team} pile on the pressure",
-    "high_press_win": "{who} wins it back high up", "speed_milestone": "What a strike from {who}",
-    "distance_milestone": "{who} keeps on running", "pass_milestone": "{who} keeps the ball moving",
-}
-_CASUAL_LINE = {
-    "result": "The scoreboard tells the story.", "chaos": "That was a real chance.",
-    "control": "One side is on top right now.", "pressure_shift": "The pressure is building.",
-    "rhythm": "A pause in the action.", "milestone": "A personal landmark in this match.",
-}
-
-
 def persona_inputs(moment: dict[str, Any], narrative: dict[str, Any]) -> dict[str, Any]:
     """Build the exact JSON the model sees: the moment without ids, and the narrative with its evidence."""
     player = moment["player"]
@@ -78,12 +60,6 @@ def persona_inputs(moment: dict[str, Any], narrative: dict[str, Any]) -> dict[st
         },
         "narrative": {k: narrative[k] for k in ("headline", "why_it_matters", "theme", "evidence")},
     }
-
-
-def count_numbers(text: str) -> int:
-    """Count the numbers a viewer reads: a score such as 1-0 is one number and a clock time such as 13:52 is none."""
-    text = _TIME.sub(" ", text)
-    return len(_SCORE.findall(text)) + len(_NUMBER.findall(_SCORE.sub(" ", text)))
 
 
 def parse_versions(content: str) -> dict[str, Any]:
@@ -106,8 +82,6 @@ def check_version(persona: str, version: Any, inputs: dict[str, Any]) -> dict[st
         raise ValueError(f"{persona} headline is over {HEADLINE_MAX} characters")
     # Facts, evidence values, half and match clock; the narrative's own text is not a source.
     check_numbers(version.values(), allowed_numbers(inputs))
-    if persona == "casual" and count_numbers(" ".join(version.values())) > CASUAL_MAX_NUMBERS:
-        raise ValueError(f"casual version cites more than {CASUAL_MAX_NUMBERS} numbers")
     player = inputs["moment"]["player"]
     if persona == "player" and player and player["name"] not in version["headline"]:
         raise ValueError(f"player headline must name {player['name']}")
@@ -163,28 +137,90 @@ def key_facts(moment: dict[str, Any], evidence: list[dict[str, Any]], limit: int
     return out[:limit]
 
 
-def template_versions(moment: dict[str, Any], narrative: dict[str, Any]) -> dict[str, Any]:
-    """Build all three versions from the narrative text and evidence, each with `fallback: true`."""
-    team = CLUB_NAMES.get(moment["team"], moment["team"]) if moment["team"] else "The match"
+def _short(team_id: str) -> str:
+    return CLUB_NAMES.get(team_id, team_id).split()[0]  # "Calderbrook" for Calderbrook Athletic
+
+
+def casual_template(moment: dict[str, Any]) -> dict[str, str]:
+    """A plain-words casual version built only from the moment facts, naming the key fact of each moment type."""
+    f, kind = moment["facts"], moment["type"]
+    team = CLUB_NAMES.get(moment["team"], moment["team"]) if moment["team"] else ""
     who = moment["player"]["name"] if moment["player"] else team
+    if kind in ("goal", "half_time", "full_time"):
+        (home, h), (away, a) = f["score"].items()
+    if kind == "goal":
+        us, them = (home, away) if moment["team"] == home else (away, home)
+        gf, ga = f["score"][us], f["score"][them]
+        state = (f"{_short(us)} lead {gf}-{ga}" if gf > ga else f"it's {gf}-{ga}" if gf == ga
+                 else f"{_short(us)} trail {gf}-{ga}")
+        nth = _ORDINAL[f["player_goals"] - 1] if 1 <= f["player_goals"] <= len(_ORDINAL) else f"{f['player_goals']}th"
+        return {"headline": f"{who} scores, {state}", "detail": f"Finished from {f['distance_m']} metres out.",
+                "why": f"It's {_possessive(who)} {nth} goal of the match."}
+    if kind in ("half_time", "full_time"):
+        ht, at = f["teams"][home]["shots"], f["teams"][away]["shots"]
+        leader = home if h > a else away if a > h else None
+        if kind == "half_time":
+            why = f"{CLUB_NAMES[leader]} lead at the break." if leader else "It's all square at the break."
+        else:
+            why = f"{CLUB_NAMES[leader]} win." if leader else "It ends all square."
+        whistle = "Half-time" if kind == "half_time" else "Full-time"
+        return {"headline": f"{whistle}: {_short(home)} {h}-{a} {_short(away)}",
+                "detail": f"{_short(home)} had {_count(ht, 'shot')} to {_possessive(_short(away))} {at}.", "why": why}
+    if kind == "big_chance":
+        return {"headline": f"Big chance for {who}",
+                "detail": f"The shot from {f['distance_m']} metres was {_OUTCOME[f['outcome']]}.",
+                "why": f"{team} have had {_count(f['team_shots'], 'shot')} so far."}
+    if kind == "pressure_spell":
+        return {"headline": f"{team} pile on the pressure",
+                "detail": f"{_count(f['shots'], 'shot')} in {f['window_minutes']} minutes.",
+                "why": f"The latest came from {who}."}
+    if kind == "high_press_win":
+        return {"headline": f"{who} wins the ball back high up",
+                "detail": f"{who} took it off {f['target']} {f['x_m']} metres up the pitch.",
+                "why": f"{team} have won the ball back {_count(f['team_pressures_won'], 'time')} by pressing."}
+    if kind == "momentum_swing":
+        to, m = CLUB_NAMES[f["to_team"]], f["momentum"][f["to_team"]]
+        return {"headline": f"{to} take control",
+                "detail": f"{to} have had {m['possession_pct']}% of the ball "
+                          f"in the last {f['window_minutes']} minutes.",
+                "why": f"They have {_count(m['shots'], 'shot')} and {m['final_third_entries']} final-third entries "
+                       f"in that spell."}
+    if kind == "speed_milestone":
+        fastest = (f"That is {_possessive(team)} fastest shot so far." if f["team_top_speed_kmh"] == f["speed_kmh"]
+                   else f"{_possessive(team)} fastest shot so far is {f['team_top_speed_kmh']} km/h.")
+        return {"headline": f"{who} fires a shot at {f['speed_kmh']} km/h",
+                "detail": f"From {f['distance_m']} metres, it was {_OUTCOME[f['outcome']]}.", "why": fastest}
+    if kind == "distance_milestone":
+        return {"headline": f"{who} passes {f['milestone_km']} km",
+                "detail": f"{who} has covered {f['distance_m']} metres so far.",
+                "why": f"That's after {int(moment['match_clock'].split(':')[0])} minutes."}
+    if kind == "pass_milestone":
+        return {"headline": f"{who} reaches {f['passes']} passes",
+                "detail": f"{f['passes_completed']} of them found a teammate.",
+                "why": f"That's {f['pass_accuracy_pct']}% accuracy."}
+    return {"headline": f"{kind.replace('_', ' ').capitalize()} at {moment['match_clock']}",
+            "detail": f"{team or 'The match'} moves on.", "why": f"{who or 'The match'} is involved."}
+
+
+def template_versions(moment: dict[str, Any]) -> dict[str, Any]:
+    """Build all three versions from the moment facts alone, each with `fallback: true`.
+
+    Nothing comes from the narrative, which may be model-written, so a templated version is wholly template.
+    """
+    narrative = template_narrative(moment, {"teams": {cid: {"name": name} for cid, name in CLUB_NAMES.items()}})
     headline, why = narrative["headline"], narrative["why_it_matters"]
     numbers = ", ".join(key_facts(moment, narrative["evidence"]))
-    casual_line = _CASUAL_LINE.get(narrative["theme"], "A moment worth noting.")
-    casual_headline = _CASUAL_HEADLINE.get(moment["type"], "Key moment").format(team=team, who=who)
-    first_sentence = re.split(r"(?<=[.!?])\s", why)[0]
-    if not moment["player"]:
-        player_headline, player_why = headline, casual_line
-    else:
-        # The casual headline has no numbers, so clipping it can never cut a number in half.
-        player_headline = headline if who in headline else _clip(f"{who}: {casual_headline}")
-        player_why = f"{who} is at the centre of this {moment['type'].replace('_', ' ')}."
-    casual_why = (first_sentence if count_numbers(first_sentence) <= CASUAL_MAX_NUMBERS
-                  else "It could shape what comes next.")
+    casual = casual_template(moment)
+    who = moment["player"]["name"] if moment["player"] else None
+    # The casual headline names the player for most types; otherwise lead with the name. Clipping a headline
+    # that starts with the name can never cut the name.
+    player_headline = (headline if not who or who in headline else
+                       casual["headline"] if who in casual["headline"] else _clip(f"{who}: {casual['headline']}"))
     return {
         "analyst": {"headline": headline, "detail": f"Key numbers: {numbers}." if numbers else why, "why": why,
                     "fallback": True},
-        "casual": {"headline": casual_headline, "detail": casual_line, "why": casual_why, "fallback": True},
-        "player": {"headline": player_headline, "detail": why, "why": player_why, "fallback": True},
+        "casual": casual | {"headline": _clip(casual["headline"]), "fallback": True},
+        "player": {"headline": player_headline, "detail": why, "why": casual["why"], "fallback": True},
     }
 
 
@@ -245,7 +281,7 @@ class PersonaAgent:
                         self.client, self.deployment, self.timeout_s, SYSTEM_PROMPT, json.dumps(inputs),
                         lambda content: self._merge(content, inputs, moment, narrative), "persona", event_id)
                 if result is None:
-                    result = template_versions(moment, narrative)
+                    result = template_versions(moment)
             except Exception:
                 log.exception("stage=persona event_id=%s could not build persona versions", event_id)
                 line = {"headline": "Key moment", "detail": "A key moment in the match.", "why": "It shapes the match.",
@@ -253,9 +289,9 @@ class PersonaAgent:
                 result = {persona: dict(line) for persona in PERSONAS}
             self.cache[moment["moment_id"]] = result
         result = self.cache[moment["moment_id"]]
-        templated = [p for p in PERSONAS if result[p]["fallback"]]
-        log.info("stage=persona event_id=%s duration_ms=%.0f fallback=%s templated=%s cached=%s", event_id,
-                 (time.monotonic() - start) * 1000, "yes" if templated else "no", ",".join(templated) or "none",
+        sources = ",".join(f"{p}:{'template' if result[p]['fallback'] else 'model'}" for p in PERSONAS)
+        log.info("stage=persona event_id=%s duration_ms=%.0f fallback=%s sources=%s cached=%s", event_id,
+                 (time.monotonic() - start) * 1000, "yes" if "template" in sources else "no", sources,
                  "yes" if cached else "no")
         return result
 
@@ -266,7 +302,7 @@ class PersonaAgent:
         A retry for one failed version would be a whole new model call (up to the 30 s timeout), so it gets its
         template instead.
         """
-        raw, templates, out, failed = parse_versions(content), template_versions(moment, narrative), {}, {}
+        raw, templates, out, failed = parse_versions(content), template_versions(moment), {}, {}
         for persona in PERSONAS:
             try:
                 out[persona] = check_version(persona, raw[persona], inputs) | {"fallback": False}
