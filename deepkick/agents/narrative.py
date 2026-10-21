@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urlsplit
 
+from deepkick.simulator import load_league
+
 log = logging.getLogger("deepkick.narrative")
 
 THEMES = ("control", "chaos", "pressure_shift", "rhythm", "milestone", "result")
@@ -24,20 +26,39 @@ ATTEMPTS = 2  # the first call plus one retry
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
 _PROJECT_PATH = re.compile(r"^/api/projects/[^/]+")
+POSITION_WORDS = {
+    "GK": "goalkeeper", "RB": "right-back", "LB": "left-back", "CB": "centre-back", "RCB": "right centre-back",
+    "LCB": "left centre-back", "CDM": "defensive midfielder", "CM": "central midfielder",
+    "RCM": "right central midfielder", "LCM": "left central midfielder", "RM": "right midfielder",
+    "LM": "left midfielder", "RW": "right winger", "LW": "left winger", "ST": "striker",
+    "RST": "right-sided striker", "LST": "left-sided striker",
+}
+# Only the codes the league actually uses, as whole words, so club codes such as ASH and CAL are never touched.
+LEAGUE_POSITIONS = sorted({p["position"] for c in load_league()["clubs"] for p in c["starters"] + c["bench"]})
+_POSITION_CODE = re.compile(r"\b(" + "|".join(LEAGUE_POSITIONS) + r")\b")
 
 SYSTEM_PROMPT = f"""You are a football broadcast analyst. You explain why one flagged match moment matters.
 
 You get a JSON object with `moment` (what happened, with its `facts`) and `match_state` (the live stats).
 Reply with one JSON object and nothing else, with exactly these keys:
-- "headline": at most {HEADLINE_MAX} characters.
-- "why_it_matters": one or two sentences.
-- "theme": one of {", ".join(THEMES)}.
-- "evidence": a list of {{"stat": <key name from the input>, "value": <its number>}}, one per number you used.
+- "headline": at most 10 words and {HEADLINE_MAX} characters.
+- "why_it_matters": one or two sentences, at most 30 words in total.
+- "evidence": at least one item, each {{"stat": <key>, "value": <its number>}}, for the facts you relied on.
+  `stat` must be a key of `moment.facts` exactly as written there, such as "xg" or "distance_m";
+  for a nested fact, join the keys with dots, such as "score.CAL". `value` must be that fact's number.
 
-Rules:
+Numbers:
 - Cite only numbers that appear in `moment` or `match_state`, copied exactly as written there.
   Do not round, add, subtract, convert units or count anything yourself. If a number is not in the input, leave it out.
 - Write numbers as digits only when you are quoting one of those input numbers.
+
+Language:
+- Write the headline and why_it_matters in plain broadcast English, never raw field names: say "possession",
+  "shots on target", "expected goals" and "pass accuracy", not possession_pct, shots_on_target, team_xg
+  or pass_accuracy_pct.
+- Spell out position codes: {", ".join(f"{code} {words}" for code, words in POSITION_WORDS.items())}.
+- Keep normal punctuation: a hyphen in scores such as 0-2 and apostrophes such as Calderbrook Athletic's.
+- Describe only what the facts show. Make no claims about fatigue, confidence, form or intent.
 - Name clubs and players exactly as given in the input. Refer to a player by name or with "they", never "he" or "she".
 """
 
@@ -94,15 +115,14 @@ def check_output(content: str, inputs: dict[str, Any]) -> dict[str, Any]:
         out = json.loads(content)
     except (TypeError, json.JSONDecodeError) as exc:
         raise ValueError(f"malformed JSON: {exc}") from exc
-    if not isinstance(out, dict) or set(out) != {"headline", "why_it_matters", "theme", "evidence"}:
+    # The theme is set in code from the moment type, so a stray "theme" from the model is ignored.
+    if not isinstance(out, dict) or set(out) - {"theme"} != {"headline", "why_it_matters", "evidence"}:
         raise ValueError(f"wrong keys: {sorted(out) if isinstance(out, dict) else type(out).__name__}")
-    headline, why, theme, evidence = out["headline"], out["why_it_matters"], out["theme"], out["evidence"]
+    headline, why, evidence = out["headline"], out["why_it_matters"], out["evidence"]
     if not isinstance(headline, str) or not headline.strip() or len(headline) > HEADLINE_MAX:
         raise ValueError(f"headline must be 1-{HEADLINE_MAX} characters")
     if not isinstance(why, str) or not why.strip() or len(_SENTENCE_END.findall(why.strip())) > 2:
         raise ValueError("why_it_matters must be one or two sentences")
-    if theme not in THEMES:
-        raise ValueError(f"unknown theme {theme!r}")
     if not isinstance(evidence, list) or not all(
             isinstance(e, dict) and set(e) == {"stat", "value"} and isinstance(e["stat"], str)
             and isinstance(e["value"], (int, float)) and not isinstance(e["value"], bool) for e in evidence):
@@ -113,12 +133,24 @@ def check_output(content: str, inputs: dict[str, Any]) -> dict[str, Any]:
     invented += [str(e["value"]) for e in evidence if float(e["value"]) not in allowed]
     if invented:
         raise ValueError(f"numbers not in the inputs: {invented}")
-    # Each evidence item must name a stat that really holds that value somewhere in the inputs.
-    pairs = {(path.rsplit(".", 1)[-1], float(v)) for path, v in _leaves(inputs)}
-    wrong = [e for e in evidence if (e["stat"].rsplit(".", 1)[-1], float(e["value"])) not in pairs]
+    if not evidence:
+        raise ValueError("evidence must not be empty")
+    # Each evidence item must be a key of the moment facts ("xg", or "score.CAL" when nested) holding that value.
+    facts = dict(_leaves(inputs["moment"]["facts"]))
+    wrong = [e for e in evidence if e["stat"] not in facts or float(facts[e["stat"]]) != float(e["value"])]
     if wrong:
-        raise ValueError(f"evidence does not match the inputs: {wrong}")
-    return {"headline": headline, "why_it_matters": why, "theme": theme, "evidence": evidence}
+        raise ValueError(f"evidence does not match the moment facts: {wrong}")
+    return {"headline": headline, "why_it_matters": why, "evidence": evidence}
+
+
+def spell_out_positions(text: str) -> str:
+    """Replace standalone league position codes (RCB, ST…) with words; club codes such as ASH are left alone."""
+    return _POSITION_CODE.sub(lambda m: POSITION_WORDS.get(m.group(0), m.group(0)), text)
+
+
+def theme_for(moment_type: str) -> str:
+    """The narrative theme for a moment type; set in code, never chosen by the model."""
+    return THEME_BY_TYPE.get(moment_type, "rhythm")
 
 
 def _possessive(name: str) -> str:
@@ -187,7 +219,7 @@ def template_narrative(moment: dict[str, Any], snapshot: dict[str, Any]) -> dict
     else:
         headline = f"{kind.replace('_', ' ').capitalize()} at {moment['match_clock']}"
         why = f"{team or 'The match'} moves on."
-    return {"headline": _clip(headline), "why_it_matters": why, "theme": THEME_BY_TYPE.get(kind, "rhythm"),
+    return {"headline": _clip(headline), "why_it_matters": why, "theme": theme_for(kind),
             "evidence": [{"stat": path, "value": v} for path, v in _leaves(f)], "fallback": True}
 
 
@@ -260,7 +292,10 @@ class NarrativeAgent:
                     model=self.deployment, messages=messages, response_format={"type": "json_object"},
                     reasoning_effort=REASONING_EFFORT, max_completion_tokens=MAX_COMPLETION_TOKENS,
                     timeout=self.timeout_s)
-                return check_output(response.choices[0].message.content, inputs) | {"fallback": False}
+                checked = check_output(response.choices[0].message.content, inputs)
+                return {"headline": _clip(spell_out_positions(checked["headline"])),
+                        "why_it_matters": spell_out_positions(checked["why_it_matters"]),
+                        "theme": theme_for(moment["type"]), "evidence": checked["evidence"], "fallback": False}
             except Exception as exc:  # timeouts, API errors and rejected replies all get the retry, then the template
                 log.warning("stage=narrative event_id=%s attempt=%d failed: %s: %s",
                             moment["event_id"], attempt, type(exc).__name__, exc)
