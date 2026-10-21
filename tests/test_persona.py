@@ -6,8 +6,8 @@ import logging
 import pytest
 
 from deepkick.agents.narrative import TIMEOUT_S, template_narrative
-from deepkick.agents.persona import (OVERLAY_PRIORITY, PersonaAgent, check_versions, persona_inputs, select_overlay,
-                                     template_versions)
+from deepkick.agents.persona import (OVERLAY_PRIORITY, SYSTEM_PROMPT, PersonaAgent, check_version, count_numbers,
+                                     key_facts, parse_versions, persona_inputs, select_overlay, template_versions)
 from deepkick.contracts import PERSONAS, validate_overlay
 from deepkick.moments import PRIORITY
 from tests.conftest import FakeClient, timeout_error
@@ -60,7 +60,7 @@ def test_three_personas_come_from_one_cached_call(goal):
         assert overlay["persona"] == persona and overlay["lang"] == "en"
         assert {k: overlay["payload"][k] for k in ("headline", "detail", "why")} == reply[persona]
         assert overlay["payload"]["player"] == moment["player"]["name"]
-    assert agent.versions(moment, narrative)["fallback"] is False and len(client.calls) == 1
+    assert not any(v["fallback"] for v in agent.versions(moment, narrative).values()) and len(client.calls) == 1
 
 
 def test_overlay_timing_comes_from_the_match_clock(narrated):
@@ -119,60 +119,131 @@ def test_timeout_falls_back_to_templates_after_one_retry(goal, caplog):
     client = FakeClient(timeout_error(), timeout_error())
     with caplog.at_level(logging.INFO, logger="deepkick.persona"):
         versions = PersonaAgent(client, "m").versions(moment, narrative)
-    assert versions == template_versions(moment, narrative) and versions["fallback"] is True
+    assert versions == template_versions(moment, narrative)
+    assert all(versions[p]["fallback"] is True for p in PERSONAS)
     assert len(client.calls) == 2
     assert "APITimeoutError" in caplog.text
-    assert f"stage=persona event_id={moment['event_id']} duration_ms=" in caplog.text and "fallback=yes" in caplog.text
+    assert f"stage=persona event_id={moment['event_id']} duration_ms=" in caplog.text
+    assert "fallback=yes templated=analyst,casual,player" in caplog.text
 
 
 @pytest.mark.parametrize("persona, field, text, problem", [
     ("analyst", "detail", "A 0.9 xG chance, the best of the match.", "numbers not in the inputs"),
     ("player", "why", "It is Rafe Ironsby's 12th goal this season.", "numbers not in the inputs"),
-    ("casual", "detail", "A 0.252 xG chance from 9.2 m.", "more than one number"),
+    ("casual", "detail", "A 0.252 xG chance from 9.2 m, shot 2.", "more than 2 numbers"),
     ("player", "headline", "A cool finish to open the scoring", "player headline must name"),
     ("casual", "headline", "", "non-empty"),
 ])
 def test_check_rejects_invented_numbers_and_broken_versions(goal, persona, field, text, problem):
     moment, narrative = goal
-    reply = json.loads(_good_reply(moment))
-    reply[persona][field] = text
+    version = json.loads(_good_reply(moment))[persona] | {field: text}
     with pytest.raises(ValueError, match=problem):
-        check_versions(json.dumps(reply), persona_inputs(moment, narrative))
+        check_version(persona, version, persona_inputs(moment, narrative))
 
 
-def test_invented_number_falls_back_after_two_attempts(goal):
+@pytest.mark.parametrize("text, count", [
+    ("It is ASH 0-1 CAL.", 1),  # a score is one number
+    ("ASH 2 - 3 CAL after 58:30.", 1),  # spaced score; a clock time is none
+    ("It is 0-1 after 13:52, from 9.2 m.", 2),
+    ("A 0.252 xG chance from 9.2 m.", 2),
+    ("A 0.252 xG chance from 9.2 m, shot 2.", 3),
+    ("No numbers here.", 0),
+])
+def test_count_numbers_counts_a_score_as_one_and_a_time_as_none(text, count):
+    assert count_numbers(text) == count
+
+
+def test_casual_may_cite_a_score_and_one_more_number(goal):
+    moment, narrative = goal
+    version = {"headline": "Calderbrook Athletic lead ASH 0-1 CAL", "detail": "The finish came from 9.2 m at 13:52.",
+               "why": "It is the first goal of the match."}
+    assert check_version("casual", version, persona_inputs(moment, narrative))["detail"] == version["detail"]
+
+
+def test_one_failed_version_is_templated_alone(goal, caplog):
     moment, narrative = goal
     reply = json.loads(_good_reply(moment))
-    reply["analyst"]["why"] = "That makes it 7 goals in 3 games."
+    reply["analyst"]["why"] = "That makes it 7 goals in 3 games."  # invented numbers
+    client = FakeClient(json.dumps(reply))
+    with caplog.at_level(logging.INFO, logger="deepkick.persona"):
+        versions = PersonaAgent(client, "m").versions(moment, narrative)
+    assert len(client.calls) == 1  # no retry: the other two versions are kept
+    assert versions["analyst"] == template_versions(moment, narrative)["analyst"]
+    for persona in ("casual", "player"):
+        assert versions[persona] == reply[persona] | {"fallback": False}
+    assert f"event_id={moment['event_id']} persona=analyst fallback=yes: numbers not in the inputs" in caplog.text
+    assert "fallback=yes templated=analyst cached=no" in caplog.text
+
+
+def test_every_version_failing_retries_then_falls_back(goal):
+    moment, narrative = goal
+    reply = json.loads(_good_reply(moment))
+    for persona in PERSONAS:
+        reply[persona]["why"] = "That makes it 7 goals in 3 games."
     client = FakeClient(json.dumps(reply), json.dumps(reply))
-    assert PersonaAgent(client, "m").versions(moment, narrative)["fallback"] is True
-    assert len(client.calls) == 2
+    versions = PersonaAgent(client, "m").versions(moment, narrative)
+    assert len(client.calls) == 2 and versions == template_versions(moment, narrative)
+
+
+@pytest.mark.parametrize("content", ["not json", "[]", json.dumps({"analyst": {}, "casual": {}})])
+def test_a_reply_without_all_three_versions_is_retried(goal, content):
+    moment, narrative = goal
+    with pytest.raises(ValueError):
+        parse_versions(content)
+    client = FakeClient(content, _good_reply(moment))
+    versions = PersonaAgent(client, "m").versions(moment, narrative)
+    assert len(client.calls) == 2 and not any(v["fallback"] for v in versions.values())
 
 
 def test_narrative_text_is_not_a_number_source(goal):
     moment, narrative = goal
     narrative = narrative | {"why_it_matters": "They now have 44 touches in the box."}
-    reply = json.loads(_good_reply(moment))
-    reply["analyst"]["why"] = "They now have 44 touches in the box."
+    version = json.loads(_good_reply(moment))["analyst"] | {"why": "They now have 44 touches in the box."}
     with pytest.raises(ValueError, match="numbers not in the inputs"):
-        check_versions(json.dumps(reply), persona_inputs(moment, narrative))
+        check_version("analyst", version, persona_inputs(moment, narrative))
 
 
 def test_position_codes_in_replies_are_spelled_out(goal):
     moment, narrative = goal
-    reply = json.loads(_good_reply(moment))
-    reply["casual"]["detail"] = "A close-range finish from the ST."
-    assert check_versions(json.dumps(reply), persona_inputs(moment, narrative))["casual"]["detail"] == \
+    version = json.loads(_good_reply(moment))["casual"] | {"detail": "A close-range finish from the ST."}
+    assert check_version("casual", version, persona_inputs(moment, narrative))["detail"] == \
         "A close-range finish from the striker."
 
 
 def test_templates_pass_the_same_checks_for_every_moment(narrated):
     for moment, narrative in narrated:
         versions = template_versions(moment, narrative)
-        check_versions(json.dumps({p: versions[p] for p in PERSONAS}), persona_inputs(moment, narrative))
+        for persona in PERSONAS:
+            text = {k: versions[persona][k] for k in ("headline", "detail", "why")}
+            check_version(persona, text, persona_inputs(moment, narrative))
+            assert "_" not in " ".join(text.values()), (moment["moment_id"], persona)  # no raw field names
         assert len(versions["casual"]["headline"].split()) <= 10, moment["moment_id"]
         if moment["player"]:
             assert moment["player"]["name"] in versions["player"]["headline"]
+        if "score" in moment["facts"]:  # the score keeps both sides
+            (home, h), (away, a) = moment["facts"]["score"].items()
+            assert f"{home} {h}-{a} {away}" in versions["analyst"]["detail"], moment["moment_id"]
+
+
+def test_key_facts_use_plain_words_and_the_full_score(goal):
+    moment, _ = goal
+    evidence = [{"stat": "xg", "value": 0.252}, {"stat": "score.CAL", "value": 1}, {"stat": "player_goals", "value": 1},
+                {"stat": "team_shots", "value": 1}, {"stat": "outcome_code", "value": 3}]
+    assert key_facts(moment, evidence, limit=5) == ["ASH 0-1 CAL", "Rafe Ironsby's first goal", "0.252 xG",
+                                                    "1 team shot"]  # unknown keys are skipped, never printed raw
+
+
+def test_key_facts_put_the_moments_own_team_first(narrated):
+    moment, narrative = _of(narrated, "momentum_swing")
+    facts = key_facts(moment, narrative["evidence"])
+    assert facts and all(f.startswith(moment["team"]) or "window" in f for f in facts)
+
+
+def test_prompt_rules_on_causation_effort_and_casual_numbers():
+    for phrase in ("Never say one event caused another unless the facts say so",
+                   "no claims about fatigue, confidence, intent, form or effort", "at most two numbers",
+                   "A score such as 1-0 counts as one number"):
+        assert phrase in SYSTEM_PROMPT, phrase
 
 
 def test_missing_foundry_settings_use_templates_without_a_call(goal, monkeypatch):
