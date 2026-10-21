@@ -125,3 +125,29 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
 **Azure service:** a Microsoft Foundry reasoning model deployment (gpt-5-mini; `reasoning_effort` is sent on every call, which non-reasoning models such as gpt-4o-mini reject), called with the [`openai`](https://pypi.org/project/openai/) SDK on the resource's `/openai/v1` endpoint with an API key, as Microsoft's [Foundry SDK guide](https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview) recommends for Chat Completions. Set `FOUNDRY_ENDPOINT`, `FOUNDRY_MODEL_DEPLOYMENT` and `FOUNDRY_API_KEY` in `.env`. `FOUNDRY_ENDPOINT` can be a bare host (`https://<resource>.openai.azure.com`), a project endpoint (`https://<resource>.services.ai.azure.com/api/projects/<name>`) or a full target URI copied from the portal. The agent keeps only the scheme, host and optional `/api/projects/<name>`, then adds `/openai/v1/`, so a pasted `/openai/.../chat/completions?api-version=…` or `/responses` path can't be doubled. If a setting is missing or the endpoint isn't an http(s) URL, every narrative uses the template.
 
 **Tests:** [`tests/test_narrative.py`](tests/test_narrative.py) replaces the model client with a fake. It covers a good reply, invented numbers in text and in evidence, a timeout, endpoint normalisation (bare host, project endpoint and target URIs), player names in the template text, malformed JSON and bad fields, a retry that recovers, missing settings, and the template for every moment type.
+
+## 5. Personalise: Persona Agent
+
+[`deepkick/agents/persona.py`](deepkick/agents/persona.py) takes the Narrative Agent's output for a moment (headline, `why_it_matters`, theme, evidence) and the moment's facts. It rewrites them for three viewers, then turns the right version into an overlay for each viewer profile.
+
+- **One call, three versions:** one model call per moment returns `analyst`, `casual` and `player` versions, each with `headline`, `detail` and `why`. The result is cached by moment id, so switching persona never calls the model again.
+  - `analyst`: precise, with the key numbers from the evidence.
+  - `casual`: plain words, no jargon, at most one number.
+  - `player`: centred on the player in the moment, with their full name in the headline (or on the team when there is no player).
+- **Checks:** the reply must have all three versions, each with non-empty fields and a headline of at most 70 characters. Every number in every version must appear in the moment facts or the narrative's evidence. The narrative's text isn't a source, and the match clock counts. The casual version may cite at most one number, and the player headline must contain the player's name. Position codes are spelled out afterwards, as in the Narrative Agent. The word limits and wording rules (facts only, no raw field names, normal punctuation) are prompt rules only.
+- **Failure recovery:** it reuses the Narrative Agent's client setup, endpoint handling, 30-second timeout and single retry. After a timeout, an error or a rejected reply on both attempts, all three versions are built from templates using the narrative text and evidence, with `fallback: true`. It never raises.
+- **Viewer selection (plain Python, no model):** `select_overlay(moment, versions, profile)` picks the profile's persona and returns an overlay that follows the Overlay contract. It is checked by `validate_overlay` in [`deepkick/contracts.py`](deepkick/contracts.py), which checks fields, types, `persona` and `lang`.
+  - **Priority:** 1–5 by moment type (goal 5, full-time 4, big chance, momentum swing, pressure spell and half-time 3, high press win and speed or pass milestones 2, distance milestones 1). It goes up by 1 when the moment involves the viewer's favourite club or player, capped at 5; a half-time or full-time moment involves both clubs.
+  - **Other club:** a moment of priority 2 or lower for the viewer's other club is shown as priority 1. Goals keep priority 5 for every profile and are never dropped.
+  - **Timing:** `show_at_ms` comes from the match clock, and `duration_ms` is 8000 for goals and 6000 for everything else.
+  - **Language:** `lang` stays `en` until the translation stage.
+- **Logging:** each handoff logs `stage=persona event_id=… duration_ms=… fallback=yes|no cached=yes|no`, and each failed attempt is logged with its reason.
+
+```bash
+# Print the first 8 overlays for an analyst who follows ASH and player ASH08
+.venv/bin/python -m deepkick.agents.persona tests/fixtures/replay_ASH-CAL-42.jsonl --persona analyst --club ASH --player ASH08 --limit 8
+```
+
+**Azure service:** the same Microsoft Foundry model deployment as the Narrative Agent (`FOUNDRY_*` in `.env`). The CLI calls the model twice per new moment: once for the narrative and once for the three persona versions. Without `FOUNDRY_*`, both stages use their templates.
+
+**Tests:** [`tests/test_persona.py`](tests/test_persona.py) uses a fake model client and the seed-42 replay. It covers three personas from one cached call, the favourite club and player boost and its cap, goals never dropped for any profile, timeout fallback, invented numbers and broken versions being rejected, templates passing the same checks for every moment, overlay timing, and the CLI. [`tests/test_contracts.py`](tests/test_contracts.py) covers valid and invalid overlays.
