@@ -41,6 +41,14 @@ def test_rejects_shot_without_realistic_speed(replay, speed):
         validate_event(event)
 
 
+@pytest.mark.parametrize("speed", [None, -1, 37.1, "quick"])
+def test_rejects_run_without_a_plausible_speed(replay, speed):
+    event = copy.deepcopy(next(e for e in replay if e["event_type"] == "player_run"))
+    event["payload"]["speed_kmh"] = speed
+    with pytest.raises(ValueError, match="player_run speed_kmh"):
+        validate_event(event)
+
+
 def test_metadata_may_omit_player_and_coordinates(replay):
     validate_event(replay[0])
     assert replay[0]["player"] is None and replay[0]["coordinates"] is None

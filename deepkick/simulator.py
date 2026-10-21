@@ -32,6 +32,7 @@ BLOCK_SHIFT = 0.4  # how far outfield players follow the ball up or down the pit
 TRACK_S = 5 * 60  # every starter's off-ball distance is reported this often
 RUN_M_PER_MIN = {"GK": 55.0, "outfield": 98.0}  # per minute, before the stamina factor (0.8-1.2)
 BOX = (LENGTH - 16.5, WIDTH / 2 - 20.16, WIDTH / 2 + 20.16)  # penalty area: x from, y from, y to
+RUN_SPEED_KMH = (12.0, 37.0)  # a run's top speed; longer runs reach higher speeds
 
 log = logging.getLogger("deepkick.simulator")
 
@@ -56,6 +57,14 @@ def _ref(player: dict[str, Any]) -> dict[str, Any]:
 
 def _xy(xy: tuple[float, float]) -> dict[str, float]:
     return {"x": round(xy[0], 1), "y": round(xy[1], 1)}
+
+
+def run_speed_kmh(seed: int, event_id: str, distance_m: float, with_ball: bool) -> float:
+    """Top speed of one run, from its own RNG seeded by (seed, event_id) so the match's main RNG stream is untouched."""
+    rng = random.Random(f"{seed}:{event_id}")
+    low, high = RUN_SPEED_KMH
+    speed = (low + 20 * min(1.0, distance_m / 19) + rng.gauss(0, 3)) * (0.92 if with_ball else 1.0)
+    return round(max(low, min(high, speed)), 1)
 
 
 class _Match:
@@ -108,7 +117,7 @@ class _Match:
              xy: tuple[float, float] | None, payload: dict[str, Any]) -> None:
         offset = self.clock + (HALF_TIME_BREAK if self.half == 2 else 0)
         self.events.append({
-            "event_id": f"{self.match_id}-{len(self.events):05d}",
+            "event_id": self.next_event_id(),
             "match_id": self.match_id,
             "timestamp": (self.kickoff + timedelta(seconds=offset)).isoformat().replace("+00:00", "Z"),
             "match_clock": f"{self.clock // 60:02d}:{self.clock % 60:02d}",
@@ -121,6 +130,10 @@ class _Match:
             "context": {"score": dict(self.score), "possession_team": self.possession,
                         "pressure_index": round(self.pressure, 2)},
         })
+
+    def next_event_id(self) -> str:
+        """The id the next emitted event will get."""
+        return f"{self.match_id}-{len(self.events):05d}"
 
     def meta(self, status: str) -> None:
         payload: dict[str, Any] = {"status": status}
@@ -180,8 +193,10 @@ class _Match:
                 rate *= (0.8 + 0.4 * p["ratings"]["stamina"] / 99) * self.rng.uniform(0.92, 1.08)
                 slot = club["formation"]["slots"][p["position"]]
                 at = _clamp(slot["x"], slot["y"])
-                self.emit("player_run", club["id"], p, at,
-                          {"end": _xy(at), "distance_m": round(rate * minutes, 1), "with_ball": False})
+                distance = round(rate * minutes, 1)
+                # A whole-window summary, so its speed is the average over the window, not a sprint.
+                self.emit("player_run", club["id"], p, at, {"end": _xy(at), "distance_m": distance, "with_ball": False,
+                                                            "speed_kmh": round(distance / (minutes * 60) * 3.6, 1)})
 
     def step(self) -> None:
         """Play one on-ball action for the team in possession."""
@@ -235,10 +250,12 @@ class _Match:
         x, y = self.ball
         runner = self.carrier if self.carrier["position"] != "GK" else self.pick_near(att, self.ball, outfield=True)
         end = _clamp(x + self.rng.uniform(3, 19), y + self.rng.gauss(0, 5.4))
+        distance, with_ball = round(math.dist(self.ball, end), 1), runner is self.carrier
         self.emit("player_run", att, runner, self.ball, {
             "end": _xy(end),
-            "distance_m": round(math.dist(self.ball, end), 1),
-            "with_ball": runner is self.carrier,
+            "distance_m": distance,
+            "with_ball": with_ball,
+            "speed_kmh": run_speed_kmh(self.seed, self.next_event_id(), distance, with_ball),
         })
         self.carrier, self.ball = runner, end
 

@@ -185,3 +185,13 @@ def test_momentum_favours_the_team_doing_more(replay):
         a, b = (snap["teams"][t]["momentum"] for t in ("ASH", "CAL"))
         if all(a[k] >= b[k] for k in ("shots", "xg", "possession_pct", "final_third_entries")) and a != b:
             assert a["value"] > b["value"]
+
+
+def test_top_run_speed_per_team_and_player(replay, final):
+    for team_id, team in final["teams"].items():
+        assert team["top_run_speed_kmh"] == max(e["payload"]["speed_kmh"] for e in replay
+                                                if e["event_type"] == "player_run" and e["team"] == team_id)
+    for pid, player in final["players"].items():
+        speeds = [e["payload"]["speed_kmh"] for e in replay
+                  if e["event_type"] == "player_run" and e["player"]["id"] == pid]
+        assert player["top_run_speed_kmh"] == max(speeds, default=0.0)

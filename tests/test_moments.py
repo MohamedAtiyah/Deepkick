@@ -8,6 +8,7 @@ import pytest
 from deepkick.moments import (BIG_CHANCE_XG, DISTANCE_MILESTONES_KM, HIGH_PRESS_X, MOMENT_FIELDS, PASS_MILESTONES,
                               SPEED_MILESTONE_KMH, SPELL_COOLDOWN_S, SPELL_SHOTS, SPELL_WINDOW_S, SWING_SHARE,
                               MomentDetector, goal_kind)
+from deepkick.moments import SPRINT_KMH, SPRINT_NEW_TOP_FROM_KMH
 from deepkick.simulator import clock_seconds
 from deepkick.stats import StatsAgent
 
@@ -167,10 +168,15 @@ def test_facts_only_quote_numbers_from_the_event_or_snapshot(replay, detected):
             assert facts["player_goals"] == snap["players"][m["player"]["id"]]["goals"]
         if m["type"] == "speed_milestone":
             player, team = snap["players"][m["player"]["id"]], snap["teams"][m["team"]]
-            assert facts == {"speed_kmh": event["payload"]["speed_kmh"], "distance_m": event["payload"]["distance_m"],
-                             "outcome": event["payload"]["outcome"],
-                             "player_top_speed_kmh": player["top_shot_speed_kmh"],
-                             "team_top_speed_kmh": team["top_shot_speed_kmh"]}
+            assert facts == {"shot_speed_kmh": event["payload"]["speed_kmh"],
+                             "shot_distance_m": event["payload"]["distance_m"], "outcome": event["payload"]["outcome"],
+                             "player_top_shot_speed_kmh": player["top_shot_speed_kmh"],
+                             "team_top_shot_speed_kmh": team["top_shot_speed_kmh"]}
+        if m["type"] == "sprint_milestone":
+            assert event["event_type"] == "player_run"
+            assert facts == {"run_speed_kmh": event["payload"]["speed_kmh"],
+                             "run_distance_m": event["payload"]["distance_m"],
+                             "team_top_run_speed_kmh": snap["teams"][m["team"]]["top_run_speed_kmh"]}
         if m["type"] == "distance_milestone":
             assert facts["distance_m"] == snap["players"][m["player"]["id"]]["distance_m"]
             assert facts["distance_m"] >= facts["milestone_km"] * 1000
@@ -206,3 +212,22 @@ def test_cli_prints_moments(moments, capsys):
 
     main([str(REPLAY_PATH)])
     assert [json.loads(line) for line in capsys.readouterr().out.splitlines()] == moments
+
+
+def test_sprints_are_fast_runs_or_a_teams_new_fastest(replay, moments):
+    top, expected = {}, []
+    for e in replay:
+        if e["event_type"] == "player_run":
+            speed, before = e["payload"]["speed_kmh"], top.get(e["team"], 0.0)
+            top[e["team"]] = max(before, speed)
+            if speed >= SPRINT_KMH or (speed > before and speed >= SPRINT_NEW_TOP_FROM_KMH):
+                expected.append(e["event_id"])
+    assert expected
+    assert [m["event_id"] for m in _of(moments, "sprint_milestone")] == expected
+
+
+def test_shot_and_run_speeds_stay_in_separate_moments(moments):
+    for m in _of(moments, "speed_milestone"):
+        assert set(m["facts"]) >= {"shot_speed_kmh", "shot_distance_m", "outcome"} and "run_speed_kmh" not in m["facts"]
+    for m in _of(moments, "sprint_milestone"):
+        assert set(m["facts"]) == {"run_speed_kmh", "run_distance_m", "team_top_run_speed_kmh"}

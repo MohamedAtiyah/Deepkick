@@ -299,7 +299,8 @@ def test_fallback_text_keeps_the_players_full_name(detected, every_type):
         name = moment["player"]["name"]
         assert " " in name
         out = template_narrative(moment, snap)
-        if moment["type"] in ("goal", "high_press_win", "speed_milestone", "distance_milestone", "pass_milestone"):
+        if moment["type"] in ("goal", "high_press_win", "speed_milestone", "sprint_milestone", "distance_milestone",
+                              "pass_milestone"):
             assert name in out["headline"], moment["moment_id"]
         if moment["type"] in ("goal", "high_press_win", "distance_milestone"):
             assert name in out["why_it_matters"], moment["moment_id"]
@@ -339,3 +340,28 @@ def test_cli_prints_narratives_without_calling_a_model(monkeypatch, capsys):
     main([str(REPLAY_PATH), "--limit", "3"])
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert len(lines) == 3 and all(n["fallback"] and n["moment_id"] for n in lines)
+
+
+def test_prompt_says_shot_speed_and_distance_are_not_a_run():
+    assert "a shot distance (shot_distance_m) is the distance from goal" in SYSTEM_PROMPT
+    assert "Never describe either as a player running" in SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize("stat, ok", [("shot_speed_kmh", True), ("speed_kmh", False), ("run_speed_kmh", False)])
+def test_speed_milestone_evidence_uses_the_shot_keys(every_type, stat, ok):
+    moment, snap = every_type["speed_milestone"]
+    value = moment["facts"]["shot_speed_kmh"]
+    reply = json.dumps({"headline": f"A {value} km/h shot", "why_it_matters": "It was blocked.",
+                        "evidence": [{"stat": stat, "value": value}]})
+    if ok:
+        check_output(reply, model_inputs(moment, snap))
+    else:
+        with pytest.raises(ValueError, match="evidence does not match"):
+            check_output(reply, model_inputs(moment, snap))
+
+
+def test_speed_and_sprint_templates_never_mix_up_ball_and_runner(every_type):
+    shot = template_narrative(*every_type["speed_milestone"])
+    sprint = template_narrative(*every_type["sprint_milestone"])
+    assert "shot" in shot["headline"] and not any(w in shot["headline"] + shot["why_it_matters"] for w in ("run", "sprint"))
+    assert "sprints" in sprint["headline"] and "shot" not in sprint["headline"] + sprint["why_it_matters"]

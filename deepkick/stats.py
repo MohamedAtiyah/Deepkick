@@ -39,6 +39,7 @@ class TeamStats:
     hard_passes: int = 0
     hard_passes_completed: int = 0
     top_shot_speed_kmh: float = 0.0
+    top_run_speed_kmh: float = 0.0
     tackles: int = 0
     tackles_won: int = 0
     pressures: int = 0
@@ -60,6 +61,7 @@ class PlayerStats:
     goals: int = 0
     xg: float = 0.0
     top_shot_speed_kmh: float = 0.0
+    top_run_speed_kmh: float = 0.0
     tackles: int = 0
     tackles_won: int = 0
     pressures: int = 0
@@ -196,6 +198,8 @@ class StatsAgent:
             player.pressures_won += payload["success"]
         elif kind == "player_run":
             player.distance_m += payload["distance_m"]
+            team.top_run_speed_kmh = max(team.top_run_speed_kmh, payload["speed_kmh"])
+            player.top_run_speed_kmh = max(player.top_run_speed_kmh, payload["speed_kmh"])
 
     def momentum(self) -> dict[str, dict[str, Any]]:
         """Each team's shots, xG, possession and final-third entries in the last 5 minutes, and its momentum share.

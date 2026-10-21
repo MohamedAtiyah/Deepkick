@@ -256,7 +256,8 @@ def _key_fact(moment):
     return {"big_chance": [name, str(f.get("distance_m"))], "pressure_spell": [str(f.get("shots"))],
             "high_press_win": [name, f.get("target")], "momentum_swing": [str(f.get("momentum", {}).get(
                 f.get("to_team"), {}).get("possession_pct"))],
-            "speed_milestone": [str(f.get("speed_kmh"))], "distance_milestone": [name, f"{f.get('milestone_km')} km"],
+            "speed_milestone": [str(f.get("shot_speed_kmh"))], "sprint_milestone": [name, str(f.get("run_speed_kmh"))],
+            "distance_milestone": [name, f"{f.get('milestone_km')} km"],
             "pass_milestone": [name, str(f.get("passes"))]}[moment["type"]]
 
 
@@ -275,6 +276,9 @@ def test_every_casual_template_names_its_key_fact_without_filler(narrated):
         assert not any(line in everything for line in FILLER), (moment["moment_id"], everything)
         if moment["type"] == "speed_milestone":
             assert "strike" not in everything.lower() and "km/h" in versions["casual"]["headline"]
+            assert not any(w in everything for w in ("sprint", " run ", "ran ")), everything
+        if moment["type"] == "sprint_milestone":
+            assert "sprints" in versions["casual"]["headline"] and "shot" not in everything, everything
 
 
 def test_goal_casual_names_the_scorer_and_the_score(goal):
@@ -312,3 +316,8 @@ def test_cli_prints_valid_overlays_without_calling_a_model(monkeypatch, capsys):
     for overlay in overlays:
         validate_overlay(overlay)
         assert overlay["persona"] == "player"
+
+
+def test_persona_prompt_says_shot_speed_and_distance_are_not_a_run():
+    assert "a shot distance (shot_distance_m) is the distance from goal" in SYSTEM_PROMPT
+    assert "Never describe either as a player running" in SYSTEM_PROMPT

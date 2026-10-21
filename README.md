@@ -29,6 +29,10 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 - **Pass difficulty:** every pass carries `difficulty` (0–1). It rises with pass length, a pass into the box, pressure on the passer and the number of opposition outfield players the pass goes past (line-breaking). Completion odds fall as difficulty rises.
 - **Shot speed:** every shot carries `speed_kmh` (60–130). Longer shots are struck harder.
 - **Distance covered:** every 5 minutes, and at the end of each half, each starter gets an off-ball `player_run` (`with_ball: false`) with the distance run since the last report. Outfield players cover about 9.5–10.5 km a match and keepers about 5 km, scaled by their stamina rating.
+- **Run speed:** every `player_run` carries `speed_kmh`, which never goes above 37.
+  - **Real runs:** the top speed is roughly 12–36 km/h. It rises with the run's length and is slightly lower with the ball.
+  - **5-minute tracking summaries:** these report their average speed over the window, about 3–7 km/h.
+  - **Separate RNG:** each run's speed comes from its own `random.Random` seeded with `(seed, event_id)`, so the match's main random stream is untouched. Adding speeds changed no other field of the seed-42 replay; `tests/test_simulator.py` checks this.
 - **Coordinates** are metres on a 105 × 68 pitch, oriented so the acting team always attacks towards `x=105`, the same frame as the formation slots.
 - **`context`** on each event is the match state after that event (score keyed by club id, team in possession, pressure index 0–1).
 - `match_metadata` events mark `kickoff` (with formations, starters and their slots, bench, managers, colours, stadium, referee), `half_time`, `second_half` and `full_time`.
@@ -58,8 +62,8 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 
 [`deepkick/stats.py`](deepkick/stats.py) folds each event into running team and player stats. It is pure Python and makes no model calls. Its `snapshot()` is the match state that the Narrative Agent is allowed to quote, so every number in it is already rounded.
 
-- **Team stats:** goals, shots, shots on target, xG, passes and pass accuracy, average pass length and difficulty, hard passes (difficulty ≥ 0.7) and their completion rate, top shot speed, tackles won, pressures won, and possession in seconds and as a percentage. Possession time goes to the team that held the ball between two events.
-- **Player stats:** actions, passes, shots, goals, xG, top shot speed, tackles, pressures and distance covered.
+- **Team stats:** goals, shots, shots on target, xG, passes and pass accuracy, average pass length and difficulty, hard passes (difficulty ≥ 0.7) and their completion rate, top shot speed, top run speed, tackles won, pressures won, and possession in seconds and as a percentage. Possession time goes to the team that held the ball between two events.
+- **Player stats:** actions, passes, shots, goals, xG, top shot speed, top run speed, tackles, pressures and distance covered.
 - **Momentum:** each team's shots, xG, possession share and final-third entries (completed passes or carries from before x = 70 m to beyond it) over the last 5 minutes of match clock, plus a momentum `value`: the team's share (0–100) of `2 × shots + 10 × xG + final-third entries + 5 × possession share`. The two teams' values add up to 100.
 - **Live context:** the current `pressure_index` (pressure on the team in possession, 0–1) and `possession_team`.
 - **Failure recovery:** events are validated against the contract. A malformed event is skipped, and a redelivered event (Event Hubs delivers at least once) is ignored by `event_id`. Neither changes the state, and both are logged with `fallback=yes`.
@@ -83,7 +87,8 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 | `half_time` | half-time whistle | 2 |
 | `momentum_swing` | a team's momentum value reaches 70 after the other team was last to reach 70 (from 5:00 on) | 2 |
 | `high_press_win` | a successful press at least 75 m up the pitch | 1 |
-| `speed_milestone` | a shot struck at 120 km/h or faster | 1 |
+| `speed_milestone` | a shot at 120 km/h or faster: the ball's speed. Facts are `shot_speed_kmh`, `shot_distance_m` (distance from goal), `outcome` and the player's and team's top shot speeds | 1 |
+| `sprint_milestone` | a player's run at 30 km/h or faster, or a team's new fastest run from 25 km/h. Facts are `run_speed_kmh`, `run_distance_m` and `team_top_run_speed_kmh` | 1 |
 | `distance_milestone` | a player passes 5, 8 or 10 km covered | 1 |
 | `pass_milestone` | a player's 50th or 75th pass | 1 |
 
@@ -110,7 +115,7 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
 
 - **Model input:** the moment (type, clock, team, player name and position, facts) and a trimmed snapshot (score, clock, pressure index, team stats with momentum, and the moment's player). Event and player ids are left out.
 - **No invented numbers:** the prompt tells the model to cite only numbers in that input, copied exactly. The reply is then checked. Every number in the headline, `why_it_matters` and `evidence` must appear in the input (the match clock counts too). Evidence can't be empty. Each item's `stat` must be a key of the moment's facts (`xg`, or `score.CAL` for a nested fact) and its `value` must be that fact's value. A reply that fails, or has the wrong shape or length, is rejected. A `theme` sent by the model is ignored.
-- **Wording:** the prompt asks for plain broadcast English with no raw field names ("possession", "shots on target", "expected goals"), position codes spelled out, a headline of at most 10 words and a `why_it_matters` of at most 30 words, and normal punctuation (hyphens in scores like 0-2, apostrophes). It also tells the model to describe only what the facts show, with no claims about fatigue, confidence, form or intent.
+- **Wording:** the prompt asks for plain broadcast English with no raw field names ("possession", "shots on target", "expected goals"), position codes spelled out, a headline of at most 10 words and a `why_it_matters` of at most 30 words, and normal punctuation (hyphens in scores like 0-2, apostrophes). It also tells the model to describe only what the facts show, with no claims about fatigue, confidence, form or intent. A shot speed is the ball's speed and a shot distance is the distance from goal; neither may be described as a player running.
 - **Position codes:** after a reply passes the checks, any standalone position code the league uses (from `data/league.json`, such as `RCB` or `ST`) left in the headline or `why_it_matters` is replaced with words ("right centre-back", "striker"). Club codes such as `ASH` and `CAL` are left alone.
 - **What is checked:** the validator guards the numbers and the evidence, plus the reply's shape and length. The wording rules above are limited by the prompt only, so a reply can still use a raw term or make an unsupported claim without any number in it.
 - **Model call:** Chat Completions with JSON output, `reasoning_effort="low"` and `max_completion_tokens=1500` (reasoning tokens count against that cap).
@@ -135,7 +140,7 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
   - `casual`: plain words, no jargon, at most one or two numbers (a prompt rule; not counted by code).
   - `player`: centred on the player in the moment, with their full name in the headline (or on the team when there is no player).
 - **Checks, one version at a time:** each version must have non-empty fields and a headline of at most 70 characters. Every number in it must appear in the moment facts or the narrative's evidence; the narrative's text isn't a source, and the match clock counts. The player headline must contain the player's name. Position codes are spelled out afterwards, as in the Narrative Agent.
-- **Prompt-only rules:** the word limits, how many numbers the casual version uses, plain wording, normal punctuation and three content rules are not checked by code. The content rules are: describe only what the facts show; make no claims about fatigue, confidence, intent, form or effort; and never say one event caused another unless the facts say so.
+- **Prompt-only rules:** the word limits, how many numbers the casual version uses, plain wording, normal punctuation and four content rules are not checked by code. The content rules are: describe only what the facts show; make no claims about fatigue, confidence, intent, form or effort; never say one event caused another unless the facts say so; and never describe a shot speed (the ball's speed) or shot distance (from goal) as a player running.
 - **Failure recovery:** it reuses the Narrative Agent's client setup, endpoint handling, 30-second timeout and single retry.
   - **One version fails:** only that version is replaced by its template, and the other two keep the model text. Each version is wholly model-written or wholly template, never mixed. Retrying for one version would cost a whole new call.
   - **Whole reply unusable:** if the reply isn't JSON with all three versions, every version fails, or the call times out or errors, the call is retried once. After that, all three versions come from templates.
@@ -144,7 +149,7 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
   - **Casual:** each moment type names its key fact in plain words. A goal names the scorer and the score ("Rafe Ironsby scores, Calderbrook lead 1-0"), and a speed milestone gives the speed ("fires a shot at 129.6 km/h"). There is no content-free filler.
   - **Analyst and player:** these use the Narrative Agent's facts-only template text. The analyst detail lists the key numbers in plain words, with the score (both sides) and the player's goal tally first. Fact keys the template has no wording for are left out rather than printed raw.
 - **Viewer selection (plain Python, no model):** `select_overlay(moment, versions, profile)` picks the profile's persona and returns an overlay that follows the Overlay contract. It is checked by `validate_overlay` in [`deepkick/contracts.py`](deepkick/contracts.py), which checks fields, types, `persona` and `lang`.
-  - **Priority:** 1–5 by moment type (goal 5, full-time 4, big chance, momentum swing, pressure spell and half-time 3, high press win and speed or pass milestones 2, distance milestones 1). It goes up by 1 when the moment involves the viewer's favourite club or player, capped at 5; a half-time or full-time moment involves both clubs.
+  - **Priority:** 1–5 by moment type (goal 5, full-time 4, big chance, momentum swing, pressure spell and half-time 3, high press win and speed, sprint or pass milestones 2, distance milestones 1). It goes up by 1 when the moment involves the viewer's favourite club or player, capped at 5; a half-time or full-time moment involves both clubs.
   - **Other club:** a moment of priority 2 or lower for the viewer's other club is shown as priority 1. Goals keep priority 5 for every profile and are never dropped.
   - **Timing:** `show_at_ms` comes from the match clock, and `duration_ms` is 8000 for goals and 6000 for everything else.
   - **Language:** `lang` stays `en` until the translation stage.

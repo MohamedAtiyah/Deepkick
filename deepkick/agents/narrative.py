@@ -59,13 +59,16 @@ Language:
 - Spell out position codes: {", ".join(f"{code} {words}" for code, words in POSITION_WORDS.items())}.
 - Keep normal punctuation: a hyphen in scores such as 0-2 and apostrophes such as Calderbrook Athletic's.
 - Describe only what the facts show. Make no claims about fatigue, confidence, form or intent.
+- A shot speed (shot_speed_kmh) is the ball's speed and a shot distance (shot_distance_m) is the distance from goal.
+  Never describe either as a player running. Only run_speed_kmh and run_distance_m describe a player's run.
 - Name clubs and players exactly as given in the input. Refer to a player by name or with "they", never "he" or "she".
 """
 
 THEME_BY_TYPE = {
     "goal": "result", "full_time": "result", "half_time": "rhythm", "big_chance": "chaos",
     "pressure_spell": "pressure_shift", "high_press_win": "pressure_shift", "momentum_swing": "control",
-    "speed_milestone": "milestone", "distance_milestone": "milestone", "pass_milestone": "milestone",
+    "speed_milestone": "milestone", "sprint_milestone": "milestone", "distance_milestone": "milestone",
+    "pass_milestone": "milestone",
 }
 _GOAL_PHRASE = {"opener": "opens the scoring", "equaliser": "levels it", "go_ahead": "puts {team} ahead",
                 "extends_lead": "extends the lead", "pulls_back": "pulls one back"}
@@ -209,9 +212,13 @@ def template_narrative(moment: dict[str, Any], snapshot: dict[str, Any]) -> dict
                f"minutes, with {_count(m['shots'], 'shot')}, {m['final_third_entries']} final-third entries "
                f"and {m['possession_pct']}% of the ball.")
     elif kind == "speed_milestone":
-        headline = f"{player} fires a shot at {f['speed_kmh']} km/h"
-        why = (f"The shot from {f['distance_m']} m was {_OUTCOME[f['outcome']]}. "
-               f"{_possessive(team)} fastest shot so far is {f['team_top_speed_kmh']} km/h.")
+        headline = f"{player} fires a shot at {f['shot_speed_kmh']} km/h"
+        why = (f"The shot from {f['shot_distance_m']} m out was {_OUTCOME[f['outcome']]}. "
+               f"{_possessive(team)} fastest shot so far is {f['team_top_shot_speed_kmh']} km/h.")
+    elif kind == "sprint_milestone":
+        headline = f"{player} sprints at {f['run_speed_kmh']} km/h"
+        why = (f"{player} reached that speed on a {f['run_distance_m']} m run. "
+               f"{_possessive(team)} fastest run so far is {f['team_top_run_speed_kmh']} km/h.")
     elif kind == "distance_milestone":
         headline = f"{player} passes {f['milestone_km']} km covered"
         why = f"{player} has run {f['distance_m']} m so far for {team}."

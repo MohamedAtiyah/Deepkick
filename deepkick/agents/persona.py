@@ -21,7 +21,7 @@ CLUB_NAMES = {c["id"]: c["name"] for c in load_league()["clubs"]}
 # Overlay priority 1-5 by moment type: goals highest, the many distance milestones lowest.
 OVERLAY_PRIORITY = {
     "goal": 5, "full_time": 4, "big_chance": 3, "momentum_swing": 3, "pressure_spell": 3, "half_time": 3,
-    "high_press_win": 2, "speed_milestone": 2, "pass_milestone": 2, "distance_milestone": 1,
+    "high_press_win": 2, "speed_milestone": 2, "sprint_milestone": 2, "pass_milestone": 2, "distance_milestone": 1,
 }
 LOW_PRIORITY = 2  # at or below this, a moment for the viewer's non-favourite club is shown as priority 1
 VERSION_KEYS = ("headline", "detail", "why")
@@ -41,6 +41,8 @@ Rules for all three:
 - Cite only numbers that appear in `moment.facts` or `narrative.evidence`, copied exactly. Never round or calculate.
 - Describe only what the facts show. Make no claims about fatigue, confidence, intent, form or effort.
 - Never say one event caused another unless the facts say so.
+- A shot speed (shot_speed_kmh) is the ball's speed and a shot distance (shot_distance_m) is the distance from goal.
+  Never describe either as a player running. Only run_speed_kmh and run_distance_m describe a player's run.
 - Plain broadcast English with no raw field names: say "possession", "shots on target", "expected goals".
 - Spell out position codes: {", ".join(f"{code} {words}" for code, words in POSITION_WORDS.items())}.
 - Keep normal punctuation: a hyphen in scores such as 0-2 and apostrophes such as Calderbrook Athletic's.
@@ -94,8 +96,12 @@ _ORDINAL = ("first", "second", "third", "fourth", "fifth", "sixth")
 _FACT_WORDS = {
     "xg": "{v} xG", "team_xg": "{v} team xG", "distance_m": "{v} m", "team_shots": "{v} team shot{s}",
     "shots": "{v} shot{s}", "shots_on_target": "{v} on target", "window_minutes": "a {v}-minute window",
-    "x_m": "{v} m up the pitch", "team_pressures_won": "{v} pressure{s} won", "speed_kmh": "{v} km/h",
-    "player_top_speed_kmh": "{who_s} fastest {v} km/h", "team_top_speed_kmh": "{team_s} fastest {v} km/h",
+    "x_m": "{v} m up the pitch", "team_pressures_won": "{v} pressure{s} won",
+    "shot_speed_kmh": "a {v} km/h shot", "shot_distance_m": "{v} m from goal",
+    "player_top_shot_speed_kmh": "{who_s} fastest shot {v} km/h",
+    "team_top_shot_speed_kmh": "{team_s} fastest shot {v} km/h",
+    "run_speed_kmh": "a {v} km/h run", "run_distance_m": "a {v} m run",
+    "team_top_run_speed_kmh": "{team_s} fastest run {v} km/h",
     "milestone_km": "the {v} km mark", "passes": "{v} pass{es}", "passes_completed": "{v} completed",
     "pass_accuracy_pct": "{v}% pass accuracy", "possession_pct": "{v}% possession",
     "final_third_entries": "{v} final-third entr{ies}", "value": "{v}% of the momentum",
@@ -186,10 +192,17 @@ def casual_template(moment: dict[str, Any]) -> dict[str, str]:
                 "why": f"They have {_count(m['shots'], 'shot')} and {m['final_third_entries']} final-third entries "
                        f"in that spell."}
     if kind == "speed_milestone":
-        fastest = (f"That is {_possessive(team)} fastest shot so far." if f["team_top_speed_kmh"] == f["speed_kmh"]
-                   else f"{_possessive(team)} fastest shot so far is {f['team_top_speed_kmh']} km/h.")
-        return {"headline": f"{who} fires a shot at {f['speed_kmh']} km/h",
-                "detail": f"From {f['distance_m']} metres, it was {_OUTCOME[f['outcome']]}.", "why": fastest}
+        top = f["team_top_shot_speed_kmh"]
+        fastest = (f"That is {_possessive(team)} fastest shot so far." if top == f["shot_speed_kmh"]
+                   else f"{_possessive(team)} fastest shot so far is {top} km/h.")
+        return {"headline": f"{who} fires a shot at {f['shot_speed_kmh']} km/h",
+                "detail": f"From {f['shot_distance_m']} metres out, it was {_OUTCOME[f['outcome']]}.", "why": fastest}
+    if kind == "sprint_milestone":
+        top = f["team_top_run_speed_kmh"]
+        fastest = (f"That is {_possessive(team)} fastest run so far." if top == f["run_speed_kmh"]
+                   else f"{_possessive(team)} fastest run so far is {top} km/h.")
+        return {"headline": f"{who} sprints at {f['run_speed_kmh']} km/h",
+                "detail": f"{who} hit that speed on a {f['run_distance_m']} metre run.", "why": fastest}
     if kind == "distance_milestone":
         return {"headline": f"{who} passes {f['milestone_km']} km",
                 "detail": f"{who} has covered {f['distance_m']} metres so far.",
