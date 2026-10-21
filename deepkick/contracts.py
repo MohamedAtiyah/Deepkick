@@ -12,6 +12,7 @@ EVENT_FIELDS = frozenset(
 )
 PITCH_M = {"x": 105, "y": 68}  # pitch length and width in metres
 SHOT_SPEED_KMH = (60, 130)  # realistic range for a struck shot
+RUN_SPEED_KMH_MAX = 37  # a player's run; 5-minute tracking summaries report their (much lower) average
 _CLOCK = re.compile(r"^\d{2,3}:[0-5]\d$")
 
 
@@ -54,6 +55,8 @@ def validate_event(event: dict[str, Any]) -> None:
     if event["event_type"] == "shot" and not _in_range(payload.get("speed_kmh"), *SHOT_SPEED_KMH):
         raise ValueError(f"shot speed_kmh must be {SHOT_SPEED_KMH[0]}..{SHOT_SPEED_KMH[1]}, "
                          f"got {payload.get('speed_kmh')!r}")
+    if event["event_type"] == "player_run" and not _in_range(payload.get("speed_kmh"), 0, RUN_SPEED_KMH_MAX):
+        raise ValueError(f"player_run speed_kmh must be 0..{RUN_SPEED_KMH_MAX}, got {payload.get('speed_kmh')!r}")
 
 
 def _in_range(value: Any, low: float, high: float) -> bool:

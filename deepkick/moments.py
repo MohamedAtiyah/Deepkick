@@ -23,11 +23,14 @@ BIG_CHANCE_XG = 0.2
 HIGH_PRESS_X = 75  # metres up the pitch in the pressing team's attacking frame
 SPELL_SHOTS, SPELL_WINDOW_S, SPELL_COOLDOWN_S = 3, 5 * 60, 10 * 60
 SWING_SHARE = 70.0  # a team leads momentum once its share reaches this (a 70/30 split)
-SPEED_MILESTONE_KMH = 120.0
+SPEED_MILESTONE_KMH = 120.0  # shot speed: the ball's speed
+SPRINT_KMH = 30.0  # run speed: the player's speed
+SPRINT_NEW_TOP_FROM_KMH = 25.0  # a team's new fastest run counts from here, so early slow "records" don't fire
 DISTANCE_MILESTONES_KM = (5, 8, 10)
 PASS_MILESTONES = (50, 75)
 PRIORITY = {"goal": 3, "full_time": 3, "big_chance": 2, "pressure_spell": 2, "half_time": 2, "momentum_swing": 2,
-            "high_press_win": 1, "speed_milestone": 1, "distance_milestone": 1, "pass_milestone": 1}
+            "high_press_win": 1, "speed_milestone": 1, "sprint_milestone": 1, "distance_milestone": 1,
+            "pass_milestone": 1}
 
 
 def goal_kind(goals_for: int, goals_against: int) -> str:
@@ -50,6 +53,7 @@ class MomentDetector:
         self._last_spell: dict[str, int] = {}
         self._momentum_leader: str | None = None
         self._distance_passed: dict[str, int] = {}  # player id -> how many distance milestones already flagged
+        self._top_run: dict[str, float] = {}  # team -> fastest run speed seen before this event
 
     def detect(self, event: dict[str, Any], snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         """Return the moments this event creates, highest priority first; facts only quote the event and snapshot."""
@@ -94,9 +98,9 @@ class MomentDetector:
             if payload["speed_kmh"] >= SPEED_MILESTONE_KMH:
                 player = snap["players"][event["player"]["id"]]
                 found.append(("speed_milestone", {
-                    "speed_kmh": payload["speed_kmh"], "distance_m": payload["distance_m"],
-                    "outcome": payload["outcome"], "player_top_speed_kmh": player["top_shot_speed_kmh"],
-                    "team_top_speed_kmh": team_stats["top_shot_speed_kmh"],
+                    "shot_speed_kmh": payload["speed_kmh"], "shot_distance_m": payload["distance_m"],
+                    "outcome": payload["outcome"], "player_top_shot_speed_kmh": player["top_shot_speed_kmh"],
+                    "team_top_shot_speed_kmh": team_stats["top_shot_speed_kmh"],
                 }))
 
         elif kind == "pass":
@@ -106,6 +110,13 @@ class MomentDetector:
                                                  ("passes", "passes_completed", "pass_accuracy_pct")}))
 
         elif kind == "player_run":
+            speed, previous_top = payload["speed_kmh"], self._top_run.get(team, 0.0)
+            self._top_run[team] = max(previous_top, speed)
+            if speed >= SPRINT_KMH or (speed > previous_top and speed >= SPRINT_NEW_TOP_FROM_KMH):
+                found.append(("sprint_milestone", {
+                    "run_speed_kmh": speed, "run_distance_m": payload["distance_m"],
+                    "team_top_run_speed_kmh": snap["teams"][team]["top_run_speed_kmh"],
+                }))
             pid = event["player"]["id"]
             distance = snap["players"][pid]["distance_m"]
             passed = sum(distance >= km * 1000 for km in DISTANCE_MILESTONES_KM)

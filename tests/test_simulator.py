@@ -6,7 +6,9 @@ import json
 
 import pytest
 
-from deepkick.simulator import clock_seconds, load_league, send_events, simulate_match, write_replay
+import deepkick.simulator
+from deepkick.simulator import (RUN_SPEED_KMH, clock_seconds, load_league, run_speed_kmh, send_events, simulate_match,
+                                write_replay)
 
 
 def test_same_seed_reproduces_the_replay_file(replay):
@@ -121,3 +123,36 @@ def test_send_events_logs_and_reraises_on_failure(replay, caplog):
     with pytest.raises(EventHubError):
         send_events(replay[:3], Broken())
     assert "send failed" in caplog.text
+
+
+def _without_run_speed(events):
+    out = copy.deepcopy(events)
+    for e in out:
+        if e["event_type"] == "player_run":
+            del e["payload"]["speed_kmh"]
+    return out
+
+
+def test_run_speed_does_not_touch_the_main_rng(replay, monkeypatch):
+    # With run speeds replaced by a constant, every other field must be unchanged: the speeds use their own RNG.
+    monkeypatch.setattr(deepkick.simulator, "run_speed_kmh", lambda *args: 20.0)
+    assert _without_run_speed(simulate_match(42)) == _without_run_speed(replay)
+
+
+def test_every_run_has_a_plausible_speed(replay):
+    runs = [e["payload"] for e in replay if e["event_type"] == "player_run"]
+    assert runs and all(0 < r["speed_kmh"] <= 37 for r in runs)
+    real = [r for r in runs if r["distance_m"] < 100]  # tracking summaries cover hundreds of metres
+    summaries = [r for r in runs if r["distance_m"] >= 100]
+    assert all(RUN_SPEED_KMH[0] <= r["speed_kmh"] <= RUN_SPEED_KMH[1] for r in real)
+    assert all(r["speed_kmh"] < 10 for r in summaries)  # a 5-minute average, not a sprint
+
+
+def test_run_speed_rises_with_distance_dips_with_the_ball_and_is_capped():
+    speeds = {(d, b): [run_speed_kmh(42, f"ASH-CAL-42-{i:05d}", d, b) for i in range(400)]
+              for d in (4.0, 18.0) for b in (False, True)}
+    mean = {k: sum(v) / len(v) for k, v in speeds.items()}
+    assert mean[(18.0, False)] > mean[(4.0, False)] + 10
+    assert mean[(18.0, True)] < mean[(18.0, False)]
+    assert all(RUN_SPEED_KMH[0] <= s <= 37 for v in speeds.values() for s in v)
+    assert run_speed_kmh(42, "ASH-CAL-42-00005", 14.9, True) == run_speed_kmh(42, "ASH-CAL-42-00005", 14.9, True)
