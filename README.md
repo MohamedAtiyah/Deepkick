@@ -89,15 +89,17 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 | `high_press_win` | a successful press at least 75 m up the pitch | 1 |
 | `speed_milestone` | a shot at 120 km/h or faster: the ball's speed. Facts are `shot_speed_kmh`, `shot_distance_m` (distance from goal), `outcome` and the player's and team's top shot speeds | 1 |
 | `sprint_milestone` | a player's run at 30 km/h or faster, or a team's new fastest run from 25 km/h. Facts are `run_speed_kmh`, `run_distance_m` and `team_top_run_speed_kmh` | 1 |
-| `distance_milestone` | a player passes 5, 8 or 10 km covered | 1 |
+| `distance_milestone` | the match's leading distance coverer passes another 3 km (3, 6, 9 km): three a match, down from 48 when every player was flagged at 5, 8 and 10 km | 1 |
 | `pass_milestone` | a player's 50th or 75th pass | 1 |
 
 Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, player, priority, facts`. `facts` copies numbers from the event and the Stats Agent snapshot and nothing else, so the Narrative Agent can only quote real match state. The only exceptions are labels: a distance milestone's `milestone_km` and a spell's or swing's `window_minutes`. A `momentum_swing` belongs to the team that took momentum, so its `player` is `null`. Each handoff logs `stage=moments event_id=… moments=… duration_ms=… fallback=no`.
 
 ```bash
-# Print the moments of a replayed match as JSON lines
+# Print the moments of a replayed match as JSON lines; a count per moment type goes to stderr
 .venv/bin/python -m deepkick.moments tests/fixtures/replay_ASH-CAL-42.jsonl
 ```
+
+The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprint_milestone=6, goal=5, speed_milestone=4, momentum_swing=4, pressure_spell=4, high_press_win=4, big_chance=3, distance_milestone=3, half_time=1, full_time=1`.
 
 **Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs, calls `StatsAgent.update` and then `MomentDetector.detect` for each event, and sends the moments to the Narrative Agent.
 
@@ -130,6 +132,10 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
 **Azure service:** a Microsoft Foundry reasoning model deployment (gpt-5-mini; `reasoning_effort` is sent on every call, which non-reasoning models such as gpt-4o-mini reject), called with the [`openai`](https://pypi.org/project/openai/) SDK on the resource's `/openai/v1` endpoint with an API key, as Microsoft's [Foundry SDK guide](https://learn.microsoft.com/en-us/azure/foundry/how-to/develop/sdk-overview) recommends for Chat Completions. Set `FOUNDRY_ENDPOINT`, `FOUNDRY_MODEL_DEPLOYMENT` and `FOUNDRY_API_KEY` in `.env`. `FOUNDRY_ENDPOINT` can be a bare host (`https://<resource>.openai.azure.com`), a project endpoint (`https://<resource>.services.ai.azure.com/api/projects/<name>`) or a full target URI copied from the portal. The agent keeps only the scheme, host and optional `/api/projects/<name>`, then adds `/openai/v1/`, so a pasted `/openai/.../chat/completions?api-version=…` or `/responses` path can't be doubled. If a setting is missing or the endpoint isn't an http(s) URL, every narrative uses the template.
 
 **Tests:** [`tests/test_narrative.py`](tests/test_narrative.py) replaces the model client with a fake. It covers a good reply, invented numbers in text and in evidence, a timeout, endpoint normalisation (bare host, project endpoint and target URIs), player names in the template text, malformed JSON and bad fields, a retry that recovers, missing settings, and the template for every moment type.
+
+## 4. Render: overlay API and broadcast view
+
+Next up, not built yet. `deepkick/api.py` will stream overlays over a FastAPI WebSocket (`/ws`) and serve `/state` and `/recap`. The React broadcast view in `web/` will draw each overlay at its `show_at_ms` for its `duration_ms`. Overlays already follow the contract checked by `validate_overlay` in [`deepkick/contracts.py`](deepkick/contracts.py).
 
 ## 5. Personalise: Persona Agent
 

@@ -7,7 +7,7 @@ import json
 import logging
 import sys
 import time
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +26,7 @@ SWING_SHARE = 70.0  # a team leads momentum once its share reaches this (a 70/30
 SPEED_MILESTONE_KMH = 120.0  # shot speed: the ball's speed
 SPRINT_KMH = 30.0  # run speed: the player's speed
 SPRINT_NEW_TOP_FROM_KMH = 25.0  # a team's new fastest run counts from here, so early slow "records" don't fire
-DISTANCE_MILESTONES_KM = (5, 8, 10)
+DISTANCE_STEP_KM = 3  # only the match's leading distance coverer, at 3, 6, 9 km: three moments a match, not 48
 PASS_MILESTONES = (50, 75)
 PRIORITY = {"goal": 3, "full_time": 3, "big_chance": 2, "pressure_spell": 2, "half_time": 2, "momentum_swing": 2,
             "high_press_win": 1, "speed_milestone": 1, "sprint_milestone": 1, "distance_milestone": 1,
@@ -52,7 +52,7 @@ class MomentDetector:
         self._shots: dict[str, deque[tuple[int, float]]] = {}
         self._last_spell: dict[str, int] = {}
         self._momentum_leader: str | None = None
-        self._distance_passed: dict[str, int] = {}  # player id -> how many distance milestones already flagged
+        self._distance_marks = 0  # how many DISTANCE_STEP_KM marks the match's distance leader has passed
         self._top_run: dict[str, float] = {}  # team -> fastest run speed seen before this event
 
     def detect(self, event: dict[str, Any], snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -119,11 +119,11 @@ class MomentDetector:
                 }))
             pid = event["player"]["id"]
             distance = snap["players"][pid]["distance_m"]
-            passed = sum(distance >= km * 1000 for km in DISTANCE_MILESTONES_KM)
-            if passed > self._distance_passed.get(pid, 0):
-                self._distance_passed[pid] = passed
-                found.append(("distance_milestone", {"milestone_km": DISTANCE_MILESTONES_KM[passed - 1],
-                                                     "distance_m": distance}))
+            marks = int(distance // (DISTANCE_STEP_KM * 1000))
+            leads = distance >= max(p["distance_m"] for p in snap["players"].values())
+            if marks > self._distance_marks and leads:
+                self._distance_marks = marks
+                found.append(("distance_milestone", {"milestone_km": marks * DISTANCE_STEP_KM, "distance_m": distance}))
 
         elif kind == "pressure_event" and payload["success"] and event["coordinates"]["x"] >= HIGH_PRESS_X:
             found.append(("high_press_win", {
@@ -181,13 +181,17 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
-    stats, detector = StatsAgent(), MomentDetector()
+    stats, detector, counts = StatsAgent(), MomentDetector(), Counter()
     with args.replay.open() as f:
         for line in f:
             event = json.loads(line)
             if stats.update(event):
                 for moment in detector.detect(event, stats.snapshot()):
                     print(json.dumps(moment))
+                    counts[moment["type"]] += 1
+    # The summary goes to stderr so stdout stays one moment per line.
+    summary = ", ".join(f"{kind}={n}" for kind, n in counts.most_common())
+    print(f"{sum(counts.values())} moments: {summary}", file=sys.stderr)
 
 
 if __name__ == "__main__":

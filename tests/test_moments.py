@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from deepkick.moments import (BIG_CHANCE_XG, DISTANCE_MILESTONES_KM, HIGH_PRESS_X, MOMENT_FIELDS, PASS_MILESTONES,
+from deepkick.moments import (BIG_CHANCE_XG, DISTANCE_STEP_KM, HIGH_PRESS_X, MOMENT_FIELDS, PASS_MILESTONES,
                               SPEED_MILESTONE_KMH, SPELL_COOLDOWN_S, SPELL_SHOTS, SPELL_WINDOW_S, SWING_SHARE,
                               MomentDetector, goal_kind)
 from deepkick.moments import SPRINT_KMH, SPRINT_NEW_TOP_FROM_KMH
@@ -95,18 +95,25 @@ def test_speed_milestones_are_exactly_the_fast_shots(replay, moments):
     assert [m["event_id"] for m in _of(moments, "speed_milestone")] == expected
 
 
-def test_distance_milestones_fire_once_per_player_and_mark(replay, moments):
-    covered, expected = {}, []
+def test_distance_milestones_flag_only_the_match_leader_every_step(replay, moments):
+    covered, marks, expected = {}, 0, []
     for e in replay:
         if e["event_type"] == "player_run":
             pid = e["player"]["id"]
-            before = covered.get(pid, 0.0)
-            covered[pid] = before + e["payload"]["distance_m"]
-            crossed = [km for km in DISTANCE_MILESTONES_KM if before < km * 1000 <= covered[pid]]
-            if crossed:
-                expected.append((e["event_id"], crossed[-1]))
-    assert {km for _, km in expected} == set(DISTANCE_MILESTONES_KM)
+            covered[pid] = covered.get(pid, 0.0) + e["payload"]["distance_m"]
+            mark = int(covered[pid] // (DISTANCE_STEP_KM * 1000))
+            if mark > marks and covered[pid] >= max(covered.values()) - 0.05:  # snapshot distances are rounded to 0.1
+                marks = mark
+                expected.append((e["event_id"], mark * DISTANCE_STEP_KM))
+    assert [km for _, km in expected] == [3, 6, 9]
     assert [(m["event_id"], m["facts"]["milestone_km"]) for m in _of(moments, "distance_milestone")] == expected
+
+
+def test_distance_milestones_no_longer_dominate(moments):
+    distance = _of(moments, "distance_milestone")
+    assert 1 <= len(distance) <= 4 and len(distance) < len(moments) / 5
+    assert all(m["priority"] == 1 for m in distance)
+    assert all(m["priority"] > 1 for m in moments if m["type"] in ("goal", "big_chance"))
 
 
 def test_pass_milestones_match_each_players_pass_count(replay, moments):
@@ -211,7 +218,11 @@ def test_cli_prints_moments(moments, capsys):
     from tests.conftest import REPLAY_PATH
 
     main([str(REPLAY_PATH)])
-    assert [json.loads(line) for line in capsys.readouterr().out.splitlines()] == moments
+    out, err = capsys.readouterr()
+    assert [json.loads(line) for line in out.splitlines()] == moments
+    assert err.startswith(f"{len(moments)} moments: ")
+    for kind in {m["type"] for m in moments}:
+        assert f"{kind}={len(_of(moments, kind))}" in err
 
 
 def test_sprints_are_fast_runs_or_a_teams_new_fastest(replay, moments):
