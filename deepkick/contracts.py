@@ -58,3 +58,46 @@ def validate_event(event: dict[str, Any]) -> None:
 
 def _in_range(value: Any, low: float, high: float) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and low <= value <= high
+
+
+OVERLAY_FIELDS = frozenset(
+    {"overlay_id", "type", "match_clock", "show_at_ms", "duration_ms", "priority", "persona", "lang", "payload"}
+)
+PERSONAS = ("analyst", "casual", "player")
+LANGS = ("en", "es", "ar")
+
+
+def validate_overlay(overlay: dict[str, Any]) -> None:
+    """Raise ValueError if the overlay does not match the overlay contract."""
+    if not isinstance(overlay, dict):
+        raise ValueError("overlay must be a JSON object")
+    missing, extra = OVERLAY_FIELDS - overlay.keys(), overlay.keys() - OVERLAY_FIELDS
+    if missing or extra:
+        raise ValueError(f"bad overlay fields: missing={sorted(missing)} extra={sorted(extra)}")
+    for key in ("overlay_id", "type"):
+        if not isinstance(overlay[key], str) or not overlay[key]:
+            raise ValueError(f"{key} must be a non-empty string")
+    if not isinstance(overlay["match_clock"], str) or not _CLOCK.match(overlay["match_clock"]):
+        raise ValueError(f"bad match_clock {overlay['match_clock']!r}")
+    if not _is_int(overlay["show_at_ms"]) or overlay["show_at_ms"] < 0:
+        raise ValueError(f"show_at_ms must be a non-negative integer, got {overlay['show_at_ms']!r}")
+    if not _is_int(overlay["duration_ms"]) or overlay["duration_ms"] <= 0:
+        raise ValueError(f"duration_ms must be a positive integer, got {overlay['duration_ms']!r}")
+    if not _is_int(overlay["priority"]) or not 1 <= overlay["priority"] <= 5:
+        raise ValueError(f"priority must be an integer 1..5, got {overlay['priority']!r}")
+    if overlay["persona"] not in PERSONAS:
+        raise ValueError(f"persona must be one of {PERSONAS}, got {overlay['persona']!r}")
+    if overlay["lang"] not in LANGS:
+        raise ValueError(f"lang must be one of {LANGS}, got {overlay['lang']!r}")
+    payload = overlay["payload"]
+    if not isinstance(payload, dict) or payload.keys() != {"player", "headline", "detail", "why"}:
+        raise ValueError("payload must have exactly player, headline, detail, why")
+    if payload["player"] is not None and (not isinstance(payload["player"], str) or not payload["player"]):
+        raise ValueError("payload.player must be a player name or null")
+    for key in ("headline", "detail", "why"):
+        if not isinstance(payload[key], str) or not payload[key].strip():
+            raise ValueError(f"payload.{key} must be a non-empty string")
+
+
+def _is_int(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)

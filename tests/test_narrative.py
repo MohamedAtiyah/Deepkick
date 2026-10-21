@@ -3,43 +3,13 @@
 import copy
 import json
 import logging
-from types import SimpleNamespace
-
-import httpx2
-import openai
 import pytest
 
 from deepkick.agents.narrative import (HEADLINE_MAX, LEAGUE_POSITIONS, POSITION_WORDS, SYSTEM_PROMPT, THEME_BY_TYPE,
                                        THEMES, TIMEOUT_S, NarrativeAgent, check_output, foundry_base_url, model_inputs,
                                        spell_out_positions, template_narrative, theme_for)
-from deepkick.moments import PRIORITY, MomentDetector
-from deepkick.stats import StatsAgent
-
-
-class FakeClient:
-    """Stands in for openai.OpenAI: each call pops the next reply (a string) or raises it (an exception)."""
-
-    def __init__(self, *replies):
-        self.replies, self.calls = list(replies), []
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    def _create(self, **kwargs):
-        self.calls.append(kwargs)
-        reply = self.replies.pop(0)
-        if isinstance(reply, BaseException):
-            raise reply
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=reply))])
-
-
-@pytest.fixture(scope="module")
-def detected(replay):
-    """(moment, snapshot) pairs for every moment in the replay."""
-    stats, detector, out = StatsAgent(), MomentDetector(), []
-    for event in replay:
-        if stats.update(event):
-            snap = stats.snapshot()
-            out += [(m, snap) for m in detector.detect(event, snap)]
-    return out
+from deepkick.moments import PRIORITY
+from tests.conftest import FakeClient, timeout_error
 
 
 @pytest.fixture(scope="module")
@@ -68,10 +38,6 @@ def _good_reply(moment):
         "evidence": [{"stat": "xg", "value": f["xg"]}, {"stat": "distance_m", "value": f["distance_m"]},
                      {"stat": "team_shots", "value": f["team_shots"]}],
     })
-
-
-def _timeout():
-    return openai.APITimeoutError(request=httpx2.Request("POST", "https://example.test/openai/v1/chat/completions"))
 
 
 def test_good_reply_is_used(goal):
@@ -214,7 +180,7 @@ def test_retry_recovers_after_a_bad_first_reply(goal):
 
 def test_timeout_falls_back_after_one_retry(goal, caplog):
     moment, snap = goal
-    client = FakeClient(_timeout(), _timeout())
+    client = FakeClient(timeout_error(), timeout_error())
     with caplog.at_level(logging.INFO, logger="deepkick.narrative"):
         out = NarrativeAgent(client, "m").explain(moment, snap)
     assert out == template_narrative(moment, snap) and out["fallback"] is True

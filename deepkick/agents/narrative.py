@@ -10,7 +10,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterable, Iterator
 from urllib.parse import urlsplit
 
 from deepkick.simulator import load_league
@@ -128,11 +128,7 @@ def check_output(content: str, inputs: dict[str, Any]) -> dict[str, Any]:
             and isinstance(e["value"], (int, float)) and not isinstance(e["value"], bool) for e in evidence):
         raise ValueError("evidence must be a list of {stat, value} with numeric values")
 
-    allowed = allowed_numbers(inputs)
-    invented = [n for n in _NUMBER.findall(f"{headline} {why}") if float(n) not in allowed]
-    invented += [str(e["value"]) for e in evidence if float(e["value"]) not in allowed]
-    if invented:
-        raise ValueError(f"numbers not in the inputs: {invented}")
+    check_numbers([headline, why] + [str(e["value"]) for e in evidence], allowed_numbers(inputs))
     if not evidence:
         raise ValueError("evidence must not be empty")
     # Each evidence item must be a key of the moment facts ("xg", or "score.CAL" when nested) holding that value.
@@ -141,6 +137,13 @@ def check_output(content: str, inputs: dict[str, Any]) -> dict[str, Any]:
     if wrong:
         raise ValueError(f"evidence does not match the moment facts: {wrong}")
     return {"headline": headline, "why_it_matters": why, "evidence": evidence}
+
+
+def check_numbers(texts: Iterable[str], allowed: set[float]) -> None:
+    """Raise ValueError if any of `texts` cites a number that is not in `allowed`."""
+    invented = [n for text in texts for n in _NUMBER.findall(text) if float(n) not in allowed]
+    if invented:
+        raise ValueError(f"numbers not in the inputs: {invented}")
 
 
 def spell_out_positions(text: str) -> str:
@@ -206,7 +209,7 @@ def template_narrative(moment: dict[str, Any], snapshot: dict[str, Any]) -> dict
                f"minutes, with {_count(m['shots'], 'shot')}, {m['final_third_entries']} final-third entries "
                f"and {m['possession_pct']}% of the ball.")
     elif kind == "speed_milestone":
-        headline = f"{player} hits a {f['speed_kmh']} km/h strike"
+        headline = f"{player} fires a shot at {f['speed_kmh']} km/h"
         why = (f"The shot from {f['distance_m']} m was {_OUTCOME[f['outcome']]}. "
                f"{_possessive(team)} fastest shot so far is {f['team_top_speed_kmh']} km/h.")
     elif kind == "distance_milestone":
@@ -236,23 +239,40 @@ def foundry_base_url(endpoint: str) -> str:
     return f"{parts.scheme}://{parts.netloc}{project.group(0) if project else ''}/openai/v1/"
 
 
-def _client_from_env() -> tuple[Any, str] | None:
+def client_from_env(stage: str = "narrative") -> tuple[Any, str] | None:
     """Build an OpenAI client for the Foundry deployment from FOUNDRY_* environment variables, or None if unset."""
+    stage_log = logging.getLogger(f"deepkick.{stage}")
     endpoint, deployment, key = (os.environ.get(k) for k in
                                  ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY"))
     if not (endpoint and deployment and key):
-        log.warning("stage=narrative FOUNDRY_* settings missing; every narrative will use the template")
+        stage_log.warning("stage=%s FOUNDRY_* settings missing; every %s will use the template", stage, stage)
         return None
     try:
         base = foundry_base_url(endpoint)
     except ValueError as exc:
-        log.warning("stage=narrative %s; every narrative will use the template", exc)
+        stage_log.warning("stage=%s %s; every %s will use the template", stage, exc, stage)
         return None
     from openai import OpenAI
 
-    log.info("stage=narrative foundry base_path=%s deployment=%s", urlsplit(base).path, deployment)
+    stage_log.info("stage=%s foundry base_path=%s deployment=%s", stage, urlsplit(base).path, deployment)
     # The agent does its own single retry so each attempt is logged; the SDK's retries are off.
     return OpenAI(base_url=base, api_key=key, timeout=TIMEOUT_S, max_retries=0), deployment
+
+
+def ask_with_retry(client: Any, deployment: str | None, timeout_s: float, system_prompt: str, user_content: str,
+                   check: Callable[[str], dict[str, Any]], stage: str, event_id: str | None) -> dict[str, Any] | None:
+    """Call the chat model up to ATTEMPTS times; return `check(reply)` for the first reply that passes, else None."""
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
+    for attempt in range(1, ATTEMPTS + 1):
+        try:
+            response = client.chat.completions.create(
+                model=deployment, messages=messages, response_format={"type": "json_object"},
+                reasoning_effort=REASONING_EFFORT, max_completion_tokens=MAX_COMPLETION_TOKENS, timeout=timeout_s)
+            return check(response.choices[0].message.content)
+        except Exception as exc:  # timeouts, API errors and rejected replies all get the retry, then the template
+            logging.getLogger(f"deepkick.{stage}").warning("stage=%s event_id=%s attempt=%d failed: %s: %s",
+                                                           stage, event_id, attempt, type(exc).__name__, exc)
+    return None
 
 
 class NarrativeAgent:
@@ -260,7 +280,7 @@ class NarrativeAgent:
 
     def __init__(self, client: Any | None = None, deployment: str | None = None, timeout_s: float = TIMEOUT_S) -> None:
         if client is None:
-            client, deployment = _client_from_env() or (None, None)
+            client, deployment = client_from_env("narrative") or (None, None)
         self.client, self.deployment, self.timeout_s = client, deployment, timeout_s
 
     def explain(self, moment: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -284,22 +304,15 @@ class NarrativeAgent:
     def _ask_model(self, moment: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any] | None:
         """Call the model up to ATTEMPTS times; return a checked narrative, or None if every attempt failed."""
         inputs = model_inputs(moment, snapshot)
-        messages = [{"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": json.dumps(inputs)}]
-        for attempt in range(1, ATTEMPTS + 1):
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.deployment, messages=messages, response_format={"type": "json_object"},
-                    reasoning_effort=REASONING_EFFORT, max_completion_tokens=MAX_COMPLETION_TOKENS,
-                    timeout=self.timeout_s)
-                checked = check_output(response.choices[0].message.content, inputs)
-                return {"headline": _clip(spell_out_positions(checked["headline"])),
-                        "why_it_matters": spell_out_positions(checked["why_it_matters"]),
-                        "theme": theme_for(moment["type"]), "evidence": checked["evidence"], "fallback": False}
-            except Exception as exc:  # timeouts, API errors and rejected replies all get the retry, then the template
-                log.warning("stage=narrative event_id=%s attempt=%d failed: %s: %s",
-                            moment["event_id"], attempt, type(exc).__name__, exc)
-        return None
+
+        def check(content: str) -> dict[str, Any]:
+            checked = check_output(content, inputs)
+            return {"headline": _clip(spell_out_positions(checked["headline"])),
+                    "why_it_matters": spell_out_positions(checked["why_it_matters"]),
+                    "theme": theme_for(moment["type"]), "evidence": checked["evidence"], "fallback": False}
+
+        return ask_with_retry(self.client, self.deployment, self.timeout_s, SYSTEM_PROMPT, json.dumps(inputs), check,
+                              "narrative", moment["event_id"])
 
 
 def main(argv: list[str] | None = None) -> None:
