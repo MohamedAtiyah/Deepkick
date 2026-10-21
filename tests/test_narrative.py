@@ -9,8 +9,9 @@ import httpx2
 import openai
 import pytest
 
-from deepkick.agents.narrative import (HEADLINE_MAX, THEMES, TIMEOUT_S, NarrativeAgent, check_output,
-                                       foundry_base_url, model_inputs, template_narrative)
+from deepkick.agents.narrative import (HEADLINE_MAX, LEAGUE_POSITIONS, POSITION_WORDS, SYSTEM_PROMPT, THEME_BY_TYPE,
+                                       THEMES, TIMEOUT_S, NarrativeAgent, check_output, foundry_base_url, model_inputs,
+                                       spell_out_positions, template_narrative, theme_for)
 from deepkick.moments import PRIORITY, MomentDetector
 from deepkick.stats import StatsAgent
 
@@ -64,7 +65,6 @@ def _good_reply(moment):
     return json.dumps({
         "headline": f"{moment['player']['name']} opens the scoring with a {f['xg']} xG chance",
         "why_it_matters": f"It came from {f['distance_m']} m. That is shot number {f['team_shots']} for the side.",
-        "theme": "result",
         "evidence": [{"stat": "xg", "value": f["xg"]}, {"stat": "distance_m", "value": f["distance_m"]},
                      {"stat": "team_shots", "value": f["team_shots"]}],
     })
@@ -79,7 +79,7 @@ def test_good_reply_is_used(goal):
     client = FakeClient(_good_reply(moment))
     out = NarrativeAgent(client, "gpt-4o-mini").explain(moment, snap)
     assert out["fallback"] is False
-    assert out | {"fallback": None} == json.loads(_good_reply(moment)) | {"fallback": None}
+    assert out == json.loads(_good_reply(moment)) | {"theme": "result", "fallback": False}
     call = client.calls[0]
     assert call["model"] == "gpt-4o-mini" and call["timeout"] == TIMEOUT_S == 30.0
     assert call["reasoning_effort"] == "low" and call["max_completion_tokens"] == 1500
@@ -96,6 +96,97 @@ def test_invented_number_is_rejected_then_falls_back(goal):
     out = NarrativeAgent(client, "m").explain(moment, snap)
     assert out == template_narrative(moment, snap)
     assert len(client.calls) == 2  # one retry, then the template
+
+
+def _with(moment, **fields):
+    return json.dumps(json.loads(_good_reply(moment)) | fields)
+
+
+def test_prompt_asks_for_plain_broadcast_english():
+    for phrase in ("at most 10 words", "at most 30 words", '"possession"', '"shots on target"', '"expected goals"',
+                   "never raw field names", "RCB right centre-back", "0-2", "apostrophes",
+                   "key of `moment.facts`", "score.CAL", "at least one item",
+                   "Describe only what the facts show", "fatigue, confidence, form or intent"):
+        assert phrase in SYSTEM_PROMPT, phrase
+    assert '"theme"' not in SYSTEM_PROMPT  # set in code from the moment type
+
+
+@pytest.mark.parametrize("kind, theme", [
+    ("goal", "result"), ("big_chance", "chaos"), ("momentum_swing", "control"), ("pressure_spell", "pressure_shift"),
+    ("full_time", "result"), ("half_time", "rhythm"), ("high_press_win", "pressure_shift"),
+    ("speed_milestone", "milestone"), ("distance_milestone", "milestone"), ("pass_milestone", "milestone"),
+])
+def test_theme_is_set_in_code_from_the_moment_type(every_type, kind, theme):
+    assert theme_for(kind) == theme
+    moment, snap = every_type[kind]
+    evidence = template_narrative(moment, snap)["evidence"][:1]  # a real fact of this moment
+    # The model may still send a theme of its own; it is ignored.
+    reply = json.dumps({"headline": "A moment to note", "why_it_matters": "It shapes the match.",
+                        "theme": "momentum", "evidence": evidence})
+    out = NarrativeAgent(FakeClient(reply), "m").explain(moment, snap)
+    assert out["fallback"] is False and out["theme"] == theme
+    assert set(THEME_BY_TYPE) == set(PRIORITY) and set(THEME_BY_TYPE.values()) <= set(THEMES)
+
+
+def test_every_league_position_code_has_words():
+    assert LEAGUE_POSITIONS and set(LEAGUE_POSITIONS) <= set(POSITION_WORDS)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("RCB Dace Blackwen holds the line", "right centre-back Dace Blackwen holds the line"),
+    ("The ST and the LW combine for CAL", "The striker and the left winger combine for CAL"),
+    ("GK, CDM and RB all involved.", "goalkeeper, defensive midfielder and right-back all involved."),
+    ("ASH 0-2 CAL after the ASH-CAL derby", "ASH 0-2 CAL after the ASH-CAL derby"),  # club codes stay
+    ("STRIKE from the CBS stand; RCBs and ST2 untouched", "STRIKE from the CBS stand; RCBs and ST2 untouched"),
+])
+def test_spell_out_positions_replaces_only_standalone_codes(text, expected):
+    assert spell_out_positions(text) == expected
+
+
+def test_position_codes_in_the_model_reply_are_spelled_out(goal):
+    moment, snap = goal
+    reply = _with(moment, headline=f"{moment['player']['name']}, the ST, scores for CAL",
+                  why_it_matters="The RCB was beaten from 9.2 m as CAL took the lead.")
+    out = NarrativeAgent(FakeClient(reply), "m").explain(moment, snap)
+    assert out["fallback"] is False
+    assert out["headline"] == f"{moment['player']['name']}, the striker, scores for CAL"
+    assert out["why_it_matters"] == "The right centre-back was beaten from 9.2 m as CAL took the lead."
+
+
+@pytest.mark.parametrize("evidence, problem", [
+    ([], "must not be empty"),
+    ([{"stat": "facts.xg", "value": 0.252}], "does not match the moment facts"),  # not a short facts key
+    ([{"stat": "possession_pct", "value": None}], "does not match the moment facts"),  # snapshot stat, not a fact
+    ([{"stat": "score.CAL", "value": 2}], "does not match the moment facts"),  # real fact, wrong value
+    ([{"stat": "xg", "value": 0.29}], "does not match the moment facts"),  # team_xg's value under xg
+])
+def test_evidence_must_be_facts_keys_with_their_values(goal, evidence, problem):
+    moment, snap = goal
+    for item in evidence:
+        if item["value"] is None:  # a real snapshot number, so only the facts-key rule can reject it
+            item["value"] = snap["teams"]["CAL"][item["stat"]]
+    with pytest.raises(ValueError, match=problem):
+        check_output(_with(moment, evidence=evidence), model_inputs(moment, snap))
+
+
+def test_nested_facts_keys_are_accepted_as_evidence(goal):
+    moment, snap = goal
+    evidence = [{"stat": "score.CAL", "value": moment["facts"]["score"]["CAL"]}, {"stat": "xg", "value": 0.252}]
+    assert check_output(_with(moment, evidence=evidence), model_inputs(moment, snap))["evidence"] == evidence
+
+
+def test_empty_evidence_is_retried_then_falls_back(goal):
+    moment, snap = goal
+    client = FakeClient(_with(moment, evidence=[]), _with(moment, evidence=[]))
+    assert NarrativeAgent(client, "m").explain(moment, snap) == template_narrative(moment, snap)
+    assert len(client.calls) == 2
+
+
+def test_xg_scores_and_apostrophes_are_fine(goal):
+    moment, snap = goal
+    reply = _with(moment, headline="Rafe Ironsby's 0.252 xG chance makes it 0-1",
+                  why_it_matters="Calderbrook Athletic's opener came from 9.2 m. That's 2 shots and 0.29 xG.")
+    assert check_output(reply, model_inputs(moment, snap))["headline"].endswith("0-1")
 
 
 def test_invented_evidence_value_is_rejected(goal):
@@ -133,15 +224,18 @@ def test_timeout_falls_back_after_one_retry(goal, caplog):
     assert "fallback=yes" in caplog.text
 
 
+EVIDENCE = [{"stat": "xg", "value": 0.252}]  # valid for the first goal, so each case below fails for one reason
+
+
 @pytest.mark.parametrize("reply", [
     "not json",
     '{"headline": "Unclosed"',
     "[]",
-    json.dumps({"headline": "x", "why_it_matters": "y.", "theme": "result"}),
-    json.dumps({"headline": "x" * (HEADLINE_MAX + 1), "why_it_matters": "y.", "theme": "result", "evidence": []}),
-    json.dumps({"headline": "x", "why_it_matters": "One. Two. Three.", "theme": "result", "evidence": []}),
-    json.dumps({"headline": "x", "why_it_matters": "y.", "theme": "drama", "evidence": []}),
-    json.dumps({"headline": "x", "why_it_matters": "y.", "theme": "result", "evidence": [{"stat": "xg"}]}),
+    json.dumps({"headline": "x", "why_it_matters": "y."}),
+    json.dumps({"headline": "x" * (HEADLINE_MAX + 1), "why_it_matters": "y.", "evidence": EVIDENCE}),
+    json.dumps({"headline": "x", "why_it_matters": "One. Two. Three.", "evidence": EVIDENCE}),
+    json.dumps({"headline": "x", "why_it_matters": "y.", "mood": "tense", "evidence": EVIDENCE}),
+    json.dumps({"headline": "x", "why_it_matters": "y.", "evidence": [{"stat": "xg"}]}),
 ])
 def test_malformed_reply_falls_back(goal, reply):
     moment, snap = goal
