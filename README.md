@@ -121,7 +121,7 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 - **Position codes:** after a reply passes the checks, any standalone position code the league uses (from `data/league.json`, such as `RCB` or `ST`) left in the headline or `why_it_matters` is replaced with words ("right centre-back", "striker"). Club codes such as `ASH` and `CAL` are left alone.
 - **What is checked:** the validator guards the numbers and the evidence, plus the reply's shape and length. The wording rules above are limited by the prompt only, so a reply can still use a raw term or make an unsupported claim without any number in it.
 - **Model call:** Chat Completions with JSON output, `reasoning_effort="low"` and `max_completion_tokens=1500` (reasoning tokens count against that cap).
-- **Failure recovery:** each call has a 30-second timeout and one retry, so the worst case is about a minute before the template is used. Reasoning models such as gpt-5-mini answer a one-word probe in about 3 s but need much longer than 4 s on a real moment. A 429 (rate limit) is handled separately. It is retried after 2 s, 4 s and then 8 s, or after the Retry-After header when the response has one, and those retries don't use up one of the two normal attempts. Only a 429 after all three waits counts as a failed attempt, and each 429 is logged and counted. After a timeout, an API error or a rejected reply on both tries, the agent returns a template narrative built straight from the moment facts, with `fallback: true`. It never raises. Every moment type has a template, and the tests run every template through the same number check as the model.
+- **Failure recovery:** each call has a 30-second timeout and one retry, so the worst case is about a minute before the template is used. Reasoning models such as gpt-5-mini answer a one-word probe in about 3 s but need much longer than 4 s on a real moment. A 429 (rate limit) is handled separately. It is retried after 2 s, 4 s and then 8 s, or after the Retry-After header when the response has one (capped at 30 s so no worker stalls), and those retries don't use up one of the two normal attempts. Only a 429 after all three waits counts as a failed attempt, and each 429 is logged and counted. After a timeout, an API error or a rejected reply on both tries, the agent returns a template narrative built straight from the moment facts, with `fallback: true`. It never raises. Every moment type has a template, and the tests run every template through the same number check as the model.
 - **Logging:** at startup the agent logs the base URL path and the deployment once (`stage=narrative foundry base_path=… deployment=…`), never the key or host. Each handoff logs `stage=narrative event_id=… duration_ms=… fallback=yes|no`. Each failed attempt is logged with its reason.
 
 ```bash
@@ -133,7 +133,7 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 
 **Tests:** [`tests/test_narrative.py`](tests/test_narrative.py) replaces the model client with a fake. It covers a good reply, invented numbers in text and in evidence, a timeout, endpoint normalisation (bare host, project endpoint and target URIs), player names in the template text, malformed JSON and bad fields, a retry that recovers, missing settings, and the template for every moment type.
 
-## 4. Render: orchestrator (overlay API and broadcast view next)
+## 4. Render: orchestrator
 
 [`deepkick/orchestrator.py`](deepkick/orchestrator.py) runs stages 2–5 over one shared match state with [Microsoft Agent Framework](https://pypi.org/project/agent-framework-core/) (`agent-framework-core` only; the `agent-framework` meta package pulls about 150 dependencies).
 
@@ -149,7 +149,7 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 - **Clock order:** finished overlays are buffered and released in match-clock (`show_at_ms`) order, even when a later moment finishes first.
 - **Half-time and full-time:** these pass through as normal overlays until the recap agent exists.
 - **Shared state:** `Orchestrator.snapshot()` returns the Stats Agent snapshot and `Orchestrator.history()` the released overlays. These are ready for the FastAPI `/state` and `/recap` endpoints, which aren't built yet.
-- **Logging:** each moment's handoff logs `stage=orchestrator event_id=… duration_ms=… fallback=yes|no model=yes|no`. The run ends with `summary events=… moments=… overlays_emitted=… overlays_dropped=… model_explained=… templated=… fallbacks=… rate_limits=… wall_s=…`, which is also printed as JSON on stderr.
+- **Logging:** each moment's handoff logs `stage=orchestrator moment_id=… duration_ms=… fallback=yes|no model=yes|no`. The run ends with `summary events=… moments=… overlays_emitted=… overlays_dropped=… model_explained=… templated=… fallbacks=… rate_limits=… wall_s=…`, which is also printed as JSON on stderr.
   - `model_explained`: the model wrote the narrative.
   - `templated`: priority 1, so no model call.
   - `fallbacks`: the model was asked, but at least one template was used.
@@ -175,7 +175,7 @@ Overlays print to stdout as JSON lines.
 - **Explain and Personalise:** the Microsoft Foundry model deployment (`FOUNDRY_*`).
 - **Orchestration:** Microsoft Agent Framework, which runs in process.
 
-**Next:** the FastAPI WebSocket (`/ws`) that streams these overlays, `/state` and `/recap`, and the React broadcast view that draws each overlay at its `show_at_ms` for its `duration_ms`.
+**Next:** the overlay API in section 5 serves this shared state. The React broadcast view, which will draw each overlay at its `show_at_ms` for its `duration_ms`, comes after that.
 
 **Tests:** [`tests/test_orchestrator.py`](tests/test_orchestrator.py) uses the seed-42 replay and a fake model client with controllable delays, and needs no network. It covers:
 - overlays in match-clock order when work finishes out of order;
@@ -190,7 +190,45 @@ Overlays print to stdout as JSON lines.
 
 The 429 backoff itself (schedule, Retry-After, and not using up the normal attempts) is tested in [`tests/test_narrative.py`](tests/test_narrative.py).
 
-## 5. Personalise: Persona Agent
+## 5. Serve: overlay API
+
+[`deepkick/api.py`](deepkick/api.py) is a FastAPI app over the orchestrator's shared state. It reuses the orchestrator's `snapshot()` and `history(profile)` accessors and has no pipeline logic of its own.
+
+| Endpoint | What it returns |
+|---|---|
+| `GET /state` | the current match snapshot: score, clock, status, team stats with momentum, player stats |
+| `GET /recap?persona=&limit=` | overlays released so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona), at most `limit` |
+| `WS /ws?persona=&club=&player=&lang=` | first every overlay already released for that viewer (so a late viewer isn't blank), then each new overlay as it's released |
+| `GET /healthz` | the run status (`not_started`, `running`, `finished`, `failed`), where each stage gets its input (`replay` or `live`; `foundry` or `templates`), and the run counters |
+
+- **Startup:** the app starts the orchestrator in the background. It uses replay mode when `REPLAY_FILE` is set (paced by `REPLAY_SPEED`, default 0, meaning as fast as possible) and live Event Hubs mode otherwise. It reads `.env` first.
+- **Many viewers, one run:** each WebSocket client has its own profile. On every release the orchestrator hands the moment and its three cached persona versions to each connected client, and `select_overlay` renders that client's persona, favourite-club boost and language. So any number of viewers share one model call per moment.
+- **Bad parameters:** an unknown `persona` or `lang` on `/ws` closes the socket (code 1008). On `/recap` it returns 422.
+
+```bash
+# Demo with no Azure at all: replay seed 42 at 30x real time (90 minutes in 3)
+REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl REPLAY_SPEED=30 .venv/bin/uvicorn deepkick.api:app --reload
+
+# Then, in another terminal
+curl localhost:8000/state
+curl "localhost:8000/recap?persona=casual&limit=5"
+curl localhost:8000/healthz
+.venv/bin/python -m websockets "ws://localhost:8000/ws?persona=analyst&club=ASH"
+
+# Live: no REPLAY_FILE, so the orchestrator reads Azure Event Hubs (start the simulator with --send afterwards)
+.venv/bin/uvicorn deepkick.api:app
+```
+
+**Azure service:** none of its own. Through the orchestrator it uses Event Hubs in live mode and the Foundry model when `FOUNDRY_*` is set. It will run on Azure Container Apps.
+
+**Tests:** [`tests/test_api.py`](tests/test_api.py) uses FastAPI's TestClient, the seed-42 replay and a fake model client, with no network. It covers:
+- the `/state`, `/recap` (order, persona, limit, bad input) and `/healthz` shapes;
+- a WebSocket client receiving the backlog and then the live overlays, with the replay paused at half-time to split them;
+- two clients with different personas and favourites each getting their own text and priorities;
+- every overlay validating against the Overlay contract;
+- the default app replaying `REPLAY_FILE` with no Azure settings.
+
+## 6. Personalise: Persona Agent
 
 [`deepkick/agents/persona.py`](deepkick/agents/persona.py) takes the Narrative Agent's output for a moment (headline, `why_it_matters`, theme, evidence) and the moment's facts. It rewrites them for three viewers, then turns the right version into an overlay for each viewer profile.
 

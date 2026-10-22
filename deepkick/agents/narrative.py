@@ -27,6 +27,7 @@ REASONING_EFFORT = "low"
 MAX_COMPLETION_TOKENS = 1500  # reasoning tokens count against this, so it is well above the reply's length
 ATTEMPTS = 2  # the first call plus one retry
 RATE_LIMIT_BACKOFF_S = (2.0, 4.0, 8.0)  # waits after a 429; these retries do not use up the ATTEMPTS
+RETRY_AFTER_MAX_S = 30.0  # a longer Retry-After must not stall a worker
 _sleep = time.sleep  # tests swap this out so backoff waits take no real time
 _rate_limit_lock = threading.Lock()
 _rate_limits = 0
@@ -290,7 +291,8 @@ def ask_with_retry(client: Any, deployment: str | None, timeout_s: float, system
                    check: Callable[[str], dict[str, Any]], stage: str, event_id: str | None) -> dict[str, Any] | None:
     """Call the chat model up to ATTEMPTS times; return `check(reply)` for the first reply that passes, else None.
 
-    A 429 is retried after RATE_LIMIT_BACKOFF_S (or the Retry-After header) without using up an attempt;
+    A 429 is retried after RATE_LIMIT_BACKOFF_S (or the Retry-After header, at most RETRY_AFTER_MAX_S)
+    without using up an attempt;
     only once those waits run out does a 429 count as a failed attempt.
     """
     global _rate_limits
@@ -308,7 +310,7 @@ def ask_with_retry(client: Any, deployment: str | None, timeout_s: float, system
                 _rate_limits += 1
             backoff = next(backoffs, None)
             if backoff is not None:
-                wait = _retry_after(exc) or backoff
+                wait = min(RETRY_AFTER_MAX_S, _retry_after(exc) or backoff)
                 stage_log.warning("stage=%s event_id=%s rate_limited=429 retry_in_s=%.1f", stage, event_id, wait)
                 _sleep(wait)
                 continue

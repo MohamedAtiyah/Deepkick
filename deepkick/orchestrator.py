@@ -88,20 +88,32 @@ class Orchestrator:
         self.profile = profile or {"persona": "analyst", "favourite_club": None, "favourite_player": None, "lang": "en"}
         self.workers, self.cap, self.emit = workers, cap, emit
         self.counts: Counter[str] = Counter()
-        self._overlays: list[dict[str, Any]] = []
+        self.status = "not_started"  # then running, finished or failed
+        # Called with (moment, versions) for each released moment, so every viewer can render their own overlay.
+        self.listeners: list[Callable[[dict[str, Any], dict[str, Any]], None]] = []
+        self._released: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        self._start, self._rate_limits_before = time.monotonic(), rate_limit_count()
         self._minute: int | None = None
         self._held: list[tuple[dict[str, Any], dict[str, Any]]] = []  # (moment, snapshot) of the open minute
         self._order: deque[str] = deque()  # moment ids in match-clock order, waiting to be released
-        self._done: dict[str, dict[str, Any] | None] = {}
+        self._done: dict[str, tuple[dict[str, Any], dict[str, Any]] | None] = {}
         self._queue: asyncio.Queue[tuple[dict[str, Any], dict[str, Any]]] | None = None
 
     def snapshot(self) -> dict[str, Any]:
         """The current match state, as the Stats Agent sees it (for /state)."""
         return self.stats.snapshot()
 
-    def history(self) -> list[dict[str, Any]]:
-        """Every overlay released so far, in match-clock order (for /recap)."""
-        return list(self._overlays)
+    def history(self, profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Every overlay released so far for a viewer profile (default: the run's), in match-clock order."""
+        return [select_overlay(m, v, profile or self.profile) for m, v in self._released]
+
+    def summary(self) -> dict[str, Any]:
+        """The run's counters so far (for /healthz and the end-of-run log)."""
+        return {"events": self.counts["events"], "moments": self.counts["moments"],
+                "emitted": self.counts["emitted"], "dropped": self.counts["dropped"],
+                "model_explained": self.counts["model_explained"], "templated": self.counts["templated"],
+                "fallbacks": self.counts["fallbacks"], "rate_limits": rate_limit_count() - self._rate_limits_before,
+                "seconds": round(time.monotonic() - self._start, 2)}
 
     def ingest(self, event: dict[str, Any]) -> None:
         """Interpret one event in line (stats, then moments); model work is only queued, never awaited here."""
@@ -134,7 +146,7 @@ class Orchestrator:
         """Take queued moments and run each through its own Explain -> Personalise workflow."""
         while True:
             moment, snapshot = await self._queue.get()
-            start, overlay, fallback = time.monotonic(), None, True
+            start, record, fallback = time.monotonic(), None, True
             model = moment["priority"] >= MODEL_MIN_PRIORITY
             try:
                 explain, personalise = ExplainExecutor(self.narrator), PersonaliseExecutor(self.personas)
@@ -143,43 +155,47 @@ class Orchestrator:
                 fallback = model and (job["narrative"]["fallback"]
                                       or any(job["versions"][p]["fallback"] for p in PERSONAS))
                 self.counts["model_explained"] += model and not job["narrative"]["fallback"]
-                overlay = select_overlay(moment, job["versions"], self.profile)
+                select_overlay(moment, job["versions"], self.profile)  # fail here, not at release, if it is broken
+                record = (moment, job["versions"])
             except Exception:  # one broken moment must not stall the release of the others
-                log.exception("stage=orchestrator event_id=%s moment_id=%s failed; no overlay",
-                              moment["event_id"], moment["moment_id"])
+                log.exception("stage=orchestrator moment_id=%s failed; no overlay", moment["moment_id"])
             self.counts["fallbacks"] += fallback
             self.counts["templated"] += not model
-            log.info("stage=orchestrator event_id=%s duration_ms=%.0f fallback=%s model=%s", moment["event_id"],
+            log.info("stage=orchestrator moment_id=%s duration_ms=%.0f fallback=%s model=%s", moment["moment_id"],
                      (time.monotonic() - start) * 1000, "yes" if fallback else "no", "yes" if model else "no")
-            self._done[moment["moment_id"]] = overlay
+            self._done[moment["moment_id"]] = record
             self._release()
             self._queue.task_done()
 
     def _release(self) -> None:
-        """Emit finished overlays in match-clock order, holding any that finished before an earlier moment."""
+        """Emit finished moments in match-clock order, holding any that finished before an earlier moment."""
         while self._order and self._order[0] in self._done:
-            overlay = self._done.pop(self._order.popleft())
-            if overlay is not None:
-                self._overlays.append(overlay)
+            record = self._done.pop(self._order.popleft())
+            if record is not None:
+                self._released.append(record)
                 self.counts["emitted"] += 1
-                self.emit(overlay)
+                self.emit(select_overlay(*record, self.profile))
+                for listener in self.listeners:
+                    listener(*record)
 
     async def run(self, events: AsyncIterator[dict[str, Any]]) -> dict[str, Any]:
         """Consume the stream to its end, wait for the model work to finish, log and return the run summary."""
-        start, rate_limits_before = time.monotonic(), rate_limit_count()
+        self._start, self._rate_limits_before, self.status = time.monotonic(), rate_limit_count(), "running"
         self._queue = asyncio.Queue()
         workers = [asyncio.create_task(self._worker()) for _ in range(self.workers)]
-        async for event in events:
-            self.ingest(event)
-        self.close_minute()
-        await self._queue.join()
-        for worker in workers:
-            worker.cancel()
-        summary = {"events": self.counts["events"], "moments": self.counts["moments"],
-                   "emitted": self.counts["emitted"], "dropped": self.counts["dropped"],
-                   "model_explained": self.counts["model_explained"], "templated": self.counts["templated"],
-                   "fallbacks": self.counts["fallbacks"], "rate_limits": rate_limit_count() - rate_limits_before,
-                   "seconds": round(time.monotonic() - start, 2)}
+        try:
+            async for event in events:
+                self.ingest(event)
+            self.close_minute()
+            await self._queue.join()
+        except BaseException:
+            self.status = "failed"
+            raise
+        finally:
+            for worker in workers:
+                worker.cancel()
+        self.status = "finished"
+        summary = self.summary()
         log.info("stage=orchestrator summary events=%d moments=%d overlays_emitted=%d overlays_dropped=%d "
                  "model_explained=%d templated=%d fallbacks=%d rate_limits=%d wall_s=%.2f", *summary.values())
         return summary
@@ -203,7 +219,7 @@ async def live_events() -> AsyncIterator[dict[str, Any]]:
 
     conn, hub = os.environ.get("EVENTHUB_CONNECTION_STRING"), os.environ.get("EVENTHUB_NAME")
     if not conn or not hub:
-        raise SystemExit("--live needs EVENTHUB_CONNECTION_STRING and EVENTHUB_NAME in .env")
+        raise RuntimeError("live mode needs EVENTHUB_CONNECTION_STRING and EVENTHUB_NAME in .env")
     inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     async def on_event(partition_context: Any, event: Any) -> None:
@@ -245,7 +261,10 @@ def main(argv: list[str] | None = None) -> None:
     orchestrator = Orchestrator(profile=profile, workers=args.workers,
                                 emit=lambda overlay: print(json.dumps(overlay), flush=True))
     events = live_events() if args.live else replay_events(args.replay, args.speed)
-    summary = asyncio.run(orchestrator.run(events))
+    try:
+        summary = asyncio.run(orchestrator.run(events))
+    except RuntimeError as exc:
+        parser.error(str(exc))
     print(json.dumps({"summary": summary}), file=sys.stderr)
 
 

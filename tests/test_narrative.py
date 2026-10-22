@@ -391,6 +391,13 @@ def test_retry_after_header_is_respected(goal, sleeps):
     assert sleeps == [5.0, 4.0]  # the header wins; an unreadable header falls back to the schedule
 
 
+def test_retry_after_is_capped_at_30_seconds(goal, sleeps):
+    moment, snap = goal
+    client = FakeClient(rate_limit_error(retry_after="120"), _good_reply(moment))
+    assert NarrativeAgent(client, "m").explain(moment, snap)["fallback"] is False
+    assert sleeps == [30.0]
+
+
 def test_429s_do_not_use_up_the_normal_attempts(goal, sleeps):
     moment, snap = goal
     # Three 429s and one bad reply would exhaust two attempts if 429s counted; here the second attempt succeeds.

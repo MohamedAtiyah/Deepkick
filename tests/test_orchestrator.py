@@ -129,9 +129,10 @@ def test_the_same_seed_gives_the_same_overlays_with_any_worker_count(baseline):
 def test_each_handoff_and_the_run_summary_are_logged(caplog):
     with caplog.at_level(logging.INFO, logger="deepkick.orchestrator"):
         _run()
-    assert re.search(r"stage=orchestrator event_id=ASH-CAL-42-\d{5} duration_ms=\d+ fallback=yes model=yes",
+    assert re.search(r"stage=orchestrator moment_id=ASH-CAL-42-\d{5}-goal duration_ms=\d+ fallback=yes model=yes",
                      caplog.text)
-    assert re.search(r"event_id=ASH-CAL-42-\d{5} duration_ms=\d+ fallback=no model=no", caplog.text)
+    assert re.search(r"moment_id=ASH-CAL-42-\d{5}-\w+ duration_ms=\d+ fallback=no model=no", caplog.text)
+    assert "stage=orchestrator event_id=" not in caplog.text  # one event can produce two moments
     assert re.search(r"summary events=1485 moments=35 overlays_emitted=35 overlays_dropped=0 model_explained=0 "
                      r"templated=17 fallbacks=18 rate_limits=0 wall_s=[\d.]+", caplog.text)
 
