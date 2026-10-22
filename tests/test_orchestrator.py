@@ -13,8 +13,10 @@ import pytest
 from deepkick.agents.narrative import NarrativeAgent
 from deepkick.agents.persona import PersonaAgent
 from deepkick.contracts import validate_overlay
-from deepkick.orchestrator import PROTECTED, Orchestrator, cap_minute, replay_events
-from tests.conftest import REPLAY_PATH, timeout_error
+from deepkick.agents.narrative import _leaves
+from deepkick.moments import PRIORITY
+from deepkick.orchestrator import MODEL_MIN_PRIORITY, PROTECTED, WORKERS, Orchestrator, cap_minute, replay_events
+from tests.conftest import REPLAY_PATH, rate_limit_error, timeout_error
 
 
 class SlowClient:
@@ -58,7 +60,9 @@ def _minute(overlay):
 def test_every_moment_becomes_a_valid_overlay_in_clock_order(baseline):
     orchestrator, out, summary = baseline
     assert summary["events"] == 1485 and summary["moments"] == 35 == summary["emitted"] == len(out)
-    assert summary["dropped"] == 0 and summary["fallbacks"] == 35  # the fake client never gives a usable reply
+    model = sum(m["priority"] >= MODEL_MIN_PRIORITY for m in _seed42_moments())
+    assert (summary["templated"], summary["model_explained"]) == (35 - model, 0)  # 17 low-priority, no usable reply
+    assert summary["dropped"] == 0 and summary["fallbacks"] == model == 18 and summary["rate_limits"] == 0
     for overlay in out:
         validate_overlay(overlay)
     assert [o["show_at_ms"] for o in out] == sorted(o["show_at_ms"] for o in out)
@@ -84,7 +88,7 @@ def test_one_moments_timeout_does_not_stall_the_others(baseline):
     elapsed = time.monotonic() - start
     slow_done = max(t for t, c in client.finished if c == slow)
     others_meanwhile = {c for t, c in client.finished if c != slow and t < slow_done}
-    assert len(others_meanwhile) >= 20  # the other workers kept going while it timed out four times
+    assert len(others_meanwhile) >= 12  # the other workers kept going while it timed out four times
     assert elapsed < 4 * 0.4 + 1.5  # about one slow moment, not a serial queue behind it
     assert out == baseline[1] and summary["emitted"] == 35  # the timed-out goal still ships, from templates
 
@@ -125,9 +129,12 @@ def test_the_same_seed_gives_the_same_overlays_with_any_worker_count(baseline):
 def test_each_handoff_and_the_run_summary_are_logged(caplog):
     with caplog.at_level(logging.INFO, logger="deepkick.orchestrator"):
         _run()
-    assert re.search(r"stage=orchestrator event_id=ASH-CAL-42-\d{5} duration_ms=\d+ fallback=yes", caplog.text)
-    assert re.search(r"summary events=1485 moments=35 overlays_emitted=35 overlays_dropped=0 fallbacks=35 "
-                     r"wall_s=[\d.]+", caplog.text)
+    assert re.search(r"stage=orchestrator moment_id=ASH-CAL-42-\d{5}-goal duration_ms=\d+ fallback=yes model=yes",
+                     caplog.text)
+    assert re.search(r"moment_id=ASH-CAL-42-\d{5}-\w+ duration_ms=\d+ fallback=no model=no", caplog.text)
+    assert "stage=orchestrator event_id=" not in caplog.text  # one event can produce two moments
+    assert re.search(r"summary events=1485 moments=35 overlays_emitted=35 overlays_dropped=0 model_explained=0 "
+                     r"templated=17 fallbacks=18 rate_limits=0 wall_s=[\d.]+", caplog.text)
 
 
 def test_cli_replay_needs_no_azure(monkeypatch, capsys):
@@ -143,3 +150,77 @@ def test_cli_replay_needs_no_azure(monkeypatch, capsys):
     overlays = [json.loads(line) for line in out.splitlines()]
     assert len(overlays) == 35 and all(o["persona"] == "casual" for o in overlays)
     assert json.loads(err.splitlines()[-1])["summary"]["emitted"] == 35
+
+
+def _seed42_moments():
+    from deepkick.moments import MomentDetector
+    from deepkick.stats import StatsAgent
+
+    stats, detector, out = StatsAgent(), MomentDetector(), []
+    for line in REPLAY_PATH.read_text().splitlines():
+        event = json.loads(line)
+        if stats.update(event):
+            out += detector.detect(event, stats.snapshot())
+    return out
+
+
+class RateLimitedClient:
+    """Fake chat client: the first call for each prompt gets a 429, the retry gets a valid model reply."""
+
+    def __init__(self):
+        self.seen, self.types, self.lock = set(), [], threading.Lock()
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    def _create(self, **kwargs):
+        content = kwargs["messages"][1]["content"]
+        inputs = json.loads(content)
+        with self.lock:
+            self.types.append(inputs["moment"]["type"])
+            first = content not in self.seen
+            self.seen.add(content)
+        if first:
+            raise rate_limit_error()
+        moment = inputs["moment"]
+        if "match_state" in inputs:  # the narrative call
+            stat, value = next(_leaves(moment["facts"]))
+            reply = {"headline": "Model headline", "why_it_matters": "Model reason.",
+                     "evidence": [{"stat": stat, "value": value}]}
+        else:  # the persona call
+            who = moment["player"]["name"] if moment["player"] else moment["team"] or "The match"
+            reply = {p: {"headline": f"Model: {who}", "detail": "Model detail.", "why": "Model why."}
+                     for p in ("analyst", "casual", "player")}
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(reply)))])
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record backoff waits instead of sleeping."""
+    import deepkick.agents.narrative as narrative
+
+    waits = []
+    monkeypatch.setattr(narrative, "_sleep", waits.append)
+    return waits
+
+
+def test_429s_back_off_and_the_overlays_still_ship_model_written(sleeps):
+    client = RateLimitedClient()
+    _, out, summary = _run(client)
+    model = [o for o in out if PRIORITY[o["type"]] >= MODEL_MIN_PRIORITY]
+    assert model and all(o["payload"]["headline"].startswith("Model:") for o in model)
+    assert summary["model_explained"] == len(model) == 18 and summary["fallbacks"] == 0
+    assert summary["rate_limits"] == len(sleeps) == 2 * len(model)  # one 429 per narrative and per persona call
+    assert set(sleeps) == {2.0}
+
+
+def test_priority_one_moments_never_call_the_model(sleeps):
+    client = RateLimitedClient()
+    _, out, summary = _run(client)
+    assert client.types and all(PRIORITY[kind] >= MODEL_MIN_PRIORITY for kind in client.types)
+    low = [o for o in out if PRIORITY[o["type"]] < MODEL_MIN_PRIORITY]
+    assert {o["type"] for o in low} == {"sprint_milestone", "speed_milestone", "high_press_win", "distance_milestone"}
+    assert summary["templated"] == len(low) == 17 and not any(o["payload"]["headline"].startswith("Model") for o in low)
+
+
+def test_default_worker_count_is_three():
+    client = SlowClient()
+    assert Orchestrator(NarrativeAgent(client, "m"), PersonaAgent(client, "m")).workers == WORKERS == 3
