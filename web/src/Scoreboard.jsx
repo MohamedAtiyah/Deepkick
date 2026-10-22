@@ -1,10 +1,12 @@
 import league from "../../data/league.json";
+import { useSmoothClock } from "./live.js";
 
 const COLOURS = Object.fromEntries(league.clubs.map((club) => [club.id, club.colours]));
 const PERIOD = { not_started: "Pre-match", kickoff: "1st half", half_time: "Half-time", second_half: "2nd half",
   full_time: "Full-time" };
 
 export default function Scoreboard({ state }) {
+  const clock = useSmoothClock(state);
   if (!state?.match_id) return <div className="scoreboard waiting">Waiting for kick-off…</div>;
   const [home, away] = Object.keys(state.score);
   const club = (id) => (
@@ -21,7 +23,7 @@ export default function Scoreboard({ state }) {
       </div>
       {club(away)}
       <div className="clock">
-        <span>{state.match_clock}</span>
+        <span>{clock}</span>
         <small>{PERIOD[state.status] ?? `Half ${state.half}`}</small>
       </div>
     </div>

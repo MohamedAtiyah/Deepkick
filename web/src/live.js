@@ -65,3 +65,38 @@ export function useOverlaySocket(profile, onOverlay) {
 
   return status;
 }
+
+const STOPPED = new Set(["not_started", "half_time", "full_time"]);
+const pad = (n) => String(n).padStart(2, "0");
+
+// The match clock between /state polls: ticks at the rate the last two polls showed, so a 30x replay counts up
+// smoothly instead of jumping 30 seconds a poll. It stops at half-time and full-time and never runs backwards.
+export function useSmoothClock(state) {
+  const sample = useRef(null); // { ms, at, rate } with rate in match ms per real ms
+  const shown = useRef(0);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!state?.match_clock) return;
+    const ms = clockMs(state.match_clock);
+    const at = performance.now();
+    const previous = sample.current;
+    let rate = previous && ms > previous.ms ? (ms - previous.ms) / (at - previous.at) : previous?.rate ?? 0;
+    if (STOPPED.has(state.status)) rate = 0;
+    if (ms < shown.current - 60_000) shown.current = 0; // a new match started
+    sample.current = { ms, at, rate };
+  }, [state]);
+
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 100);
+    return () => clearInterval(id);
+  }, []);
+
+  const s = sample.current;
+  if (!s) return state?.match_clock ?? "00:00";
+  // Run on for at most 1.5 s past a poll, so a stalled stream doesn't race ahead.
+  const estimate = s.ms + s.rate * Math.min(performance.now() - s.at, 1500);
+  shown.current = Math.max(shown.current, Math.min(estimate, s.ms + 60_000));
+  const seconds = Math.floor(shown.current / 1000);
+  return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
+}
