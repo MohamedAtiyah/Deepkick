@@ -393,6 +393,8 @@ def select_overlay(moment: dict[str, Any], versions: dict[str, Any], profile: di
         priority = 1  # a small moment for the other club; goals always keep their priority
     persona, lang = profile.get("persona"), profile.get("lang", "en")
     version = versions.get(persona) or {}
+    if lang != "en":  # the translated version, if the Translator step made one; else the English text ships
+        version = versions.get("translations", {}).get(lang, {}).get(persona) or version
     overlay = {
         "overlay_id": f"{moment['moment_id']}-{persona}-{lang}",
         "type": moment["type"],

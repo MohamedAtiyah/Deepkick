@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { clockMs } from "./live.js";
+import { clockMs, splitScores } from "./live.js";
+
+/** Text with every score isolated left-to-right, so "1-0" never displays as "0-1" in Arabic. */
+export const Text = ({ children }) =>
+  splitScores(children).map(([part, isScore], i) => (isScore ? <bdi key={i} dir="ltr">{part}</bdi> : part));
 
 const SLOTS = 2; // never more than two overlays on screen
 const QUEUE = 4; // shortcut: a late viewer's backlog is trimmed to the newest few rather than replayed for minutes
@@ -42,7 +46,7 @@ export default function OverlayStack({ overlays, matchClock, lang }) {
   }, [overlays, matchClock]);
 
   return (
-    <div className="overlays" dir={lang === "ar" ? "rtl" : "ltr"} aria-live="polite">
+    <div className="overlays" lang={lang} dir={lang === "ar" ? "rtl" : "ltr"} aria-live="polite">
       {view.onScreen.map(({ key }) => {
         const overlay = overlays.get(key);
         return (
@@ -51,9 +55,9 @@ export default function OverlayStack({ overlays, matchClock, lang }) {
               <span className="tag">{LABEL[overlay.type] ?? overlay.type}</span>
               <span className="minute">{overlay.match_clock}</span>
             </header>
-            <h2>{overlay.payload.headline}</h2>
-            <p>{overlay.payload.detail}</p>
-            <p className="why">{overlay.payload.why}</p>
+            <h2><Text>{overlay.payload.headline}</Text></h2>
+            <p><Text>{overlay.payload.detail}</Text></p>
+            <p className="why"><Text>{overlay.payload.why}</Text></p>
           </article>
         );
       })}

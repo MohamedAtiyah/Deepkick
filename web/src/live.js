@@ -100,3 +100,12 @@ export function useSmoothClock(state) {
   const seconds = Math.floor(shown.current / 1000);
   return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
 }
+
+// In right-to-left text a score like "1-0" after an Arabic word displays reversed ("0-1"): the hyphen does not join
+// Arabic-context numbers into one run the way "." does. Split scores out so the view can isolate them LTR.
+const SCORE = /(\d+(?:\.\d+)?(?:\s?[-–]\s?\d+(?:\.\d+)?)+)/;
+
+/** The text as [part, isScore] pairs, scores (hyphenated number groups) marked so they can render left-to-right. */
+export function splitScores(text) {
+  return text.split(SCORE).filter(Boolean).map((part) => [part, SCORE.test(part) && /^\d/.test(part)]);
+}

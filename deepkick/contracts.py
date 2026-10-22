@@ -67,7 +67,7 @@ OVERLAY_FIELDS = frozenset(
     {"overlay_id", "type", "match_clock", "show_at_ms", "duration_ms", "priority", "persona", "lang", "payload"}
 )
 PERSONAS = ("analyst", "casual", "player")
-LANGS = ("en", "es", "ar")
+LANGS = ("en", "ar")
 
 
 def validate_overlay(overlay: dict[str, Any]) -> None:

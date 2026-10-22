@@ -27,7 +27,7 @@ export default function App() {
       <aside className="side">
         <div className={`connection ${status}`} role="status">{STATUS_LABEL[status]}</div>
         <Panel profile={profile} onChange={setProfile} />
-        <Recap persona={profile.persona} />
+        <Recap persona={profile.persona} lang={profile.lang} />
       </aside>
     </div>
   );

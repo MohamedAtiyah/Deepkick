@@ -1,8 +1,7 @@
 import league from "../../data/league.json";
 
 const PERSONAS = [["analyst", "Analyst"], ["casual", "Casual fan"], ["player", "Player focus"]];
-// The API already accepts es and ar; enable them here once translation ships.
-const LANGUAGES = [["en", "English", true], ["es", "Español", false], ["ar", "العربية", false]];
+const LANGUAGES = [["en", "English"], ["ar", "العربية"]];
 
 export default function Panel({ profile, onChange }) {
   const set = (field) => (event) => onChange({ ...profile, [field]: event.target.value });
@@ -40,9 +39,7 @@ export default function Panel({ profile, onChange }) {
       <label>
         Language
         <select value={profile.lang} onChange={set("lang")}>
-          {LANGUAGES.map(([code, name, ready]) => (
-            <option key={code} value={code} disabled={!ready}>{ready ? name : `${name} (soon)`}</option>
-          ))}
+          {LANGUAGES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
         </select>
       </label>
     </section>

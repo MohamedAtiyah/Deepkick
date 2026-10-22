@@ -198,3 +198,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--gold); out
 /* Narrow screens stack the frame above the panel; this must come after the base rules to win. */
 @media (max-width: 1000px) { .app { grid-template-columns: 1fr; height: auto; } .frame { min-height: 560px; } }
 @media (max-width: 700px) { .name { display: none; } } /* the club badges alone keep the clock on screen */
+
+/* Arabic overlay and recap text: right to left with a font stack that shapes Arabic well. Everything else stays LTR. */
+[lang="ar"] { font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif; }
+[lang="ar"] .overlay h2, [lang="ar"] .overlay p, .recap ol[lang="ar"] { line-height: 1.5; }

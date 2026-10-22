@@ -18,7 +18,8 @@ from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
 
 from deepkick.agents.narrative import NarrativeAgent, rate_limit_count, template_narrative
 from deepkick.agents.persona import PersonaAgent, select_overlay, template_versions
-from deepkick.contracts import PERSONAS
+from deepkick.agents.translate import Translator, translate_versions
+from deepkick.contracts import LANGS, PERSONAS
 from deepkick.moments import MomentDetector
 from deepkick.simulator import clock_seconds
 from deepkick.stats import StatsAgent
@@ -61,11 +62,11 @@ class ExplainExecutor(Executor):
 
 
 class PersonaliseExecutor(Executor):
-    """Workflow step 5: the Persona Agent writes the three persona versions of one moment."""
+    """Workflow step 5: the Persona Agent writes the three persona versions, then the Translator their Arabic."""
 
-    def __init__(self, personas: PersonaAgent) -> None:
+    def __init__(self, personas: PersonaAgent, translator: Translator | None) -> None:
         super().__init__("personalise")
-        self.personas = personas
+        self.personas, self.translator = personas, translator
 
     @handler
     async def personalise(self, job: dict, ctx: WorkflowContext[Any, dict]) -> None:
@@ -74,6 +75,11 @@ class PersonaliseExecutor(Executor):
             versions = template_versions(job["moment"])
         else:
             versions = await asyncio.to_thread(self.personas.versions, job["moment"], job["narrative"])
+        if self.translator:  # translated once per moment here, so no viewer ever waits on a Translator call
+            versions = versions | {"translations": {
+                lang: await asyncio.to_thread(translate_versions, versions, self.translator, lang,
+                                              job["moment"]["event_id"])
+                for lang in LANGS if lang != "en"}}
         await ctx.yield_output(job | {"versions": versions})
 
 
@@ -82,9 +88,11 @@ class Orchestrator:
 
     def __init__(self, narrator: NarrativeAgent | None = None, personas: PersonaAgent | None = None,
                  profile: dict[str, Any] | None = None, workers: int = WORKERS, cap: int = CAP_PER_MINUTE,
-                 emit: Callable[[dict[str, Any]], None] = lambda overlay: None) -> None:
+                 emit: Callable[[dict[str, Any]], None] = lambda overlay: None,
+                 translator: Translator | None = None) -> None:
         self.stats, self.detector = StatsAgent(), MomentDetector()
         self.narrator, self.personas = narrator or NarrativeAgent(), personas or PersonaAgent()
+        self.translator = translator or Translator.from_env()
         self.profile = profile or {"persona": "analyst", "favourite_club": None, "favourite_player": None, "lang": "en"}
         self.workers, self.cap, self.emit = workers, cap, emit
         self.counts: Counter[str] = Counter()
@@ -149,7 +157,8 @@ class Orchestrator:
             start, record, fallback = time.monotonic(), None, True
             model = moment["priority"] >= MODEL_MIN_PRIORITY
             try:
-                explain, personalise = ExplainExecutor(self.narrator), PersonaliseExecutor(self.personas)
+                explain = ExplainExecutor(self.narrator)
+                personalise = PersonaliseExecutor(self.personas, self.translator)
                 workflow = WorkflowBuilder(start_executor=explain).add_edge(explain, personalise).build()
                 job = (await workflow.run({"moment": moment, "snapshot": snapshot, "model": model})).get_outputs()[0]
                 fallback = model and (job["narrative"]["fallback"]

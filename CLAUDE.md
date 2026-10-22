@@ -21,7 +21,7 @@ Microsoft Agent Framework orchestrates stages 2–5 over one shared match state.
 - Azure Event Hubs (Basic tier: one consumer group, so one orchestrator reads the stream and fans out)
 - Microsoft Foundry: gpt-5-mini, Global Standard deployment at 50,000 tokens per minute; tracing and evaluation
 - Microsoft Agent Framework
-- Azure AI Translator: English, Spanish, Arabic
+- Azure AI Translator: English and Arabic (overlay text into Arabic; English passes through)
 - React + Vite frontend
 - Deploy: Azure Container Apps (backend), Azure Static Web Apps (frontend)
 

@@ -50,11 +50,11 @@ def create_app(orchestrator: Orchestrator | None = None,
         return app.state.orchestrator.snapshot()
 
     @app.get("/recap")
-    def recap(persona: Literal["analyst", "casual", "player"] | None = None,
+    def recap(persona: Literal["analyst", "casual", "player"] | None = None, lang: Literal["en", "ar"] = "en",
               limit: int | None = Query(None, ge=1)) -> list[dict[str, Any]]:
-        """Overlays released so far, newest first, for one persona (default: the run's)."""
+        """Overlays released so far, newest first, for one persona (default: the run's) and language."""
         orchestrator = app.state.orchestrator
-        profile = orchestrator.profile | {"persona": persona} if persona else None
+        profile = orchestrator.profile | {"lang": lang} | ({"persona": persona} if persona else {})
         return orchestrator.history(profile)[::-1][:limit]
 
     @app.get("/healthz")
