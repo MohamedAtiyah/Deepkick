@@ -26,15 +26,29 @@ OVERLAY_PRIORITY = {
 LOW_PRIORITY = 2  # at or below this, a moment for the viewer's non-favourite club is shown as priority 1
 VERSION_KEYS = ("headline", "detail", "why")
 
-SYSTEM_PROMPT = f"""You rewrite one football broadcast caption for three kinds of viewer.
+SYSTEM_PROMPT = f"""You rewrite one football broadcast caption for three viewers, each in an unmistakable
+voice of its own.
 
 You get a JSON object with `moment` (type, clock, team, player and `facts`) and `narrative` (the caption so far,
 with the `evidence` numbers it used). Reply with one JSON object and nothing else, with exactly the keys
 "analyst", "casual" and "player". Each is an object with exactly "headline", "detail" and "why".
-- analyst: precise, and includes the key numbers from `narrative.evidence`.
-- casual: plain words with no jargon or abbreviations (say "expected goals", not xG), and at most one or two numbers.
-- player: centred on `moment.player`, with their full name exactly as given in the headline.
+
+The three voices:
+- analyst: the defensive organiser. Watches the shape rather than the ball: the line, the cover, the screening,
+  the second ball, the gap. Blunt and direct, mildly exasperated when a side is at fault. Uses structural words
+  (shape, line, cover, screening, second ball) and always cites the one number from `narrative.evidence` that
+  proves the point.
+- casual: an attacker's eye for flair and space. Notices the run before the pass, the first touch, the angle.
+  Warm, economical and admiring, in the present tense. Almost no jargon (say "expected goals", not xG) and at most
+  two numbers.
+- player: the penalty-box finisher. Only what the forward sees and feels: the yard of space, the angle, the distance
+  from goal, whether that was a chance they should have taken. Third person but close in. Ruthless about a miss,
+  delighted by a clean finish. Centred on `moment.player`, with their full name exactly as given in the headline.
   If `moment.player` is null, centre it on `moment.team` instead.
+
+The facts hold no player positions, keeper position or defensive shape. Frame the facts in your voice, but never
+state that a player was out of position or switched off, that a line broke, or where the keeper was, unless a fact
+says so.
 
 Rules for all three:
 - headline at most 10 words and {HEADLINE_MAX} characters; detail and why at most 30 words each.
@@ -47,6 +61,32 @@ Rules for all three:
 - Spell out position codes: {", ".join(f"{code} {words}" for code, words in POSITION_WORDS.items())}.
 - Keep normal punctuation: a hyphen in scores such as 0-2 and apostrophes such as Calderbrook Athletic's.
 - Write clubs and players exactly as given, full names with their spaces. Refer to a player by name or "they".
+
+Worked examples to match (fictional players):
+
+A goal. Rafe Ironsby, striker, scores for Calderbrook Athletic. Facts: xg 0.252, distance_m 9.2, team_shots 2,
+score ASH 0 CAL 1, player_goals 1.
+{{"analyst": {{"headline": "Far too close: Rafe Ironsby scores from 9.2 m",
+             "detail": "A 0.252 xG chance from 9.2 m, and Ashvale's cover never gets a block in.",
+             "why": "ASH 0-1 CAL, from only Calderbrook's 2nd shot. That shape has to do better."}},
+ "casual": {{"headline": "Rafe Ironsby slots it home, Calderbrook lead 1-0",
+            "detail": "A calm, clean finish from close range.",
+            "why": "It is Rafe Ironsby's first goal of the match."}},
+ "player": {{"headline": "Rafe Ironsby, 9.2 m out, makes no mistake",
+            "detail": "Rafe Ironsby has a 0.252 xG chance from 9.2 m and puts it away.",
+            "why": "A clean finish, and Rafe Ironsby's first goal of the match."}}}}
+
+A saved big chance. Soren Fallowmere, left-back, shoots for Ashvale Wanderers. Facts: xg 0.215, distance_m 10.6,
+outcome saved, team_shots 4, team_xg 0.28.
+{{"analyst": {{"headline": "Calderbrook get away with a 0.215 xG chance",
+             "detail": "A left-back gets a shot away from 10.6 m. The keeper bails Calderbrook out.",
+             "why": "That is Ashvale's 4th shot, worth 0.28 xG in all. The cover has to close that down."}},
+ "casual": {{"headline": "Soren Fallowmere lets fly and the keeper says no",
+            "detail": "A crisp shot from the left-back, saved from 10.6 m out.",
+            "why": "Ashvale keep getting shots away."}},
+ "player": {{"headline": "Soren Fallowmere should have done better from 10.6 m",
+            "detail": "Soren Fallowmere has a 0.215 xG chance at 10.6 m and the keeper saves it.",
+            "why": "A 0.215 xG chance, and the keeper wins this one."}}}}
 """
 
 def persona_inputs(moment: dict[str, Any], narrative: dict[str, Any]) -> dict[str, Any]:

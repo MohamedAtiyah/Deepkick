@@ -1,6 +1,7 @@
 """Tests for the Persona Agent and viewer selection with a mocked Foundry chat client and the seed-42 replay."""
 
 import json
+import re
 import logging
 
 import pytest
@@ -235,8 +236,55 @@ def test_key_facts_put_the_moments_own_team_first(narrated):
 
 def test_prompt_rules_on_causation_effort_and_casual_numbers():
     for phrase in ("Never say one event caused another unless the facts say so",
-                   "no claims about fatigue, confidence, intent, form or effort", "at most one or two numbers"):
+                   "no claims about fatigue, confidence, intent, form or effort", "at most\n  two numbers"):
         assert phrase in SYSTEM_PROMPT, phrase
+
+
+def test_prompt_gives_each_persona_its_own_voice():
+    for phrase in ("analyst: the defensive organiser", "Watches the shape rather than the ball",
+                   "Blunt and direct, mildly exasperated", "cites the one number",
+                   "casual: an attacker's eye for flair and space", "the run before the pass",
+                   "Warm, economical and admiring, in the present tense",
+                   "player: the penalty-box finisher", "the yard of space", "Third person but close in",
+                   "Ruthless about a miss,\n  delighted by a clean finish",
+                   "never\nstate that a player was out of position or switched off"):
+        assert phrase in SYSTEM_PROMPT, phrase
+
+
+def _prompt_examples():
+    """The worked examples in the prompt, as the dicts the model is asked to match."""
+    decoder, found, at = json.JSONDecoder(), [], 0
+    while (at := SYSTEM_PROMPT.find('{"analyst"', at)) != -1:
+        example, at = decoder.raw_decode(SYSTEM_PROMPT, at)
+        found.append(example)
+    return found
+
+
+def test_prompt_examples_pass_the_same_checks_as_the_model(narrated):
+    goal = next((m, n) for m, n in narrated if m["type"] == "goal")
+    saved = next((m, n) for m, n in narrated if m["type"] == "big_chance" and m["facts"]["outcome"] == "saved")
+    examples = _prompt_examples()
+    assert len(examples) == 2
+    for example, (moment, narrative) in zip(examples, (goal, saved)):
+        assert moment["player"]["name"] in example["player"]["headline"]
+        for persona in PERSONAS:
+            check_version(persona, example[persona], persona_inputs(moment, narrative))  # numbers come from the facts
+            assert len(example[persona]["headline"].split()) <= 10
+            assert all(len(example[persona][k].split()) <= 30 for k in ("detail", "why"))
+            text = " ".join(example[persona].values())
+            assert not re.search(r"\b(he|she|his|her)\b", text, re.I), text
+
+
+def test_prompt_names_only_fictional_league_players_and_clubs():
+    from deepkick.simulator import load_league
+
+    league = load_league()
+    names = {p["name"] for c in league["clubs"] for p in c["starters"] + c["bench"]}
+    examples = " ".join(json.dumps(e) for e in _prompt_examples())
+    assert {"Rafe Ironsby", "Soren Fallowmere"} <= names
+    capitalised_pairs = set(re.findall(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", examples))
+    clubs = {c["name"] for c in league["clubs"]}
+    assert capitalised_pairs <= names | clubs, capitalised_pairs - names - clubs
 
 
 FILLER = ("The scoreboard tells the story", "It could shape what comes next", "A personal landmark in this match",
