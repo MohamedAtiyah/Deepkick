@@ -20,7 +20,6 @@ body { margin: 0; background: var(--bg); color: var(--text); }
   height: 100vh; /* the frame and its overlays always fit the screen; the recap scrolls instead */
   padding: 16px;
 }
-@media (max-width: 1000px) { .app { grid-template-columns: 1fr; height: auto; } .frame { min-height: 560px; } }
 
 /* Match frame: no video, just a pitch with the scoreboard and lower-third overlays. */
 .frame {
@@ -56,6 +55,7 @@ body { margin: 0; background: var(--bg); color: var(--text); }
   position: absolute;
   top: 14px;
   left: 14px;
+  max-width: calc(100% - 28px);
   z-index: 2;
   display: flex;
   align-items: stretch;
@@ -74,7 +74,8 @@ body { margin: 0; background: var(--bg); color: var(--text); }
   background: var(--primary, #444);
   color: var(--secondary, #fff);
 }
-.name { font-size: 15px; white-space: nowrap; }
+.club { min-width: 0; }
+.name { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .score { display: flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 26px; background: #1c2742; }
 .score span { color: var(--muted); }
 .clock {
@@ -154,3 +155,7 @@ button:focus-visible, select:focus-visible { outline: 2px solid var(--gold); out
 .recap strong { font-size: 14px; }
 .recap p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
 .recap .empty { color: var(--muted); font-size: 14px; }
+
+/* Narrow screens stack the frame above the panel; this must come after the base rules to win. */
+@media (max-width: 1000px) { .app { grid-template-columns: 1fr; height: auto; } .frame { min-height: 560px; } }
+@media (max-width: 700px) { .name { display: none; } } /* the club badges alone keep the clock on screen */
