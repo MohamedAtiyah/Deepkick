@@ -33,10 +33,11 @@ def _good_reply(moment):
     name, f = moment["player"]["name"], moment["facts"]
     return json.dumps({
         "analyst": {"headline": f"{name} scores from {f['distance_m']} m",
-                    "detail": f"A {f['xg']} xG chance, shot number {f['team_shots']} for Calderbrook Athletic.",
+                    "detail": f"It was a {f['xg']} xG chance, shot number {f['team_shots']} for Calderbrook Athletic.",
                     "why": "It makes the score ASH 0-1 CAL."},
         "casual": {"headline": f"{name} gives Calderbrook Athletic the lead",
-                   "detail": "A close-range finish from the striker.", "why": "It is the first goal of the match."},
+                   "detail": "It is a close-range finish from the striker.",
+                   "why": "It is the first goal of the match."},
         "player": {"headline": f"{name} opens the scoring", "detail": f"{name} finished from {f['distance_m']} m.",
                    "why": f"It is {name}'s first goal of the match."},
     })
@@ -129,7 +130,10 @@ def test_timeout_falls_back_to_templates_after_one_retry(goal, caplog):
 
 
 @pytest.mark.parametrize("persona, field, text, problem", [
-    ("analyst", "detail", "A 0.9 xG chance, the best of the match.", "numbers not in the inputs"),
+    ("analyst", "detail", "It was a 0.9 xG chance, the best of the match.", "numbers not in the inputs"),
+    ("analyst", "why", "0.215", "sentence of at least 4 words with a verb"),  # a bare number
+    ("casual", "detail", "Big chance.", "sentence of at least 4 words with a verb"),  # a two-word fragment
+    ("player", "why", "A 0.252 xG chance.", "sentence of at least 4 words with a verb"),  # four words, no verb
     ("player", "why", "It is Rafe Ironsby's 12th goal this season.", "numbers not in the inputs"),
     ("player", "headline", "A cool finish to open the scoring", "player headline must name"),
     ("casual", "headline", "", "non-empty"),
@@ -200,9 +204,9 @@ def test_narrative_text_is_not_a_number_source(goal):
 
 def test_position_codes_in_replies_are_spelled_out(goal):
     moment, narrative = goal
-    version = json.loads(_good_reply(moment))["casual"] | {"detail": "A close-range finish from the ST."}
+    version = json.loads(_good_reply(moment))["casual"] | {"detail": "It is a close-range finish from the ST."}
     assert check_version("casual", version, persona_inputs(moment, narrative))["detail"] == \
-        "A close-range finish from the striker."
+        "It is a close-range finish from the striker."
 
 
 def test_templates_pass_the_same_checks_for_every_moment(narrated):
@@ -241,8 +245,10 @@ def test_prompt_rules_on_causation_effort_and_casual_numbers():
 
 
 def test_prompt_gives_each_persona_its_own_voice():
-    for phrase in ("analyst: the defensive organiser", "Watches the shape rather than the ball",
-                   "Blunt and direct, mildly exasperated", "cites the one number",
+    for phrase in ("analyst: reads the game only through what is measured", "expected goals, shot counts, shot distance",
+                   "possession, pass accuracy, momentum and speed", "Blunt and direct, mildly exasperated",
+                   "cites the one number", "Never use shape words such as cover, line, screening or second ball",
+                   "a full sentence of at least 4 words with a verb",
                    "casual: an attacker's eye for flair and space", "the run before the pass",
                    "Warm, economical and admiring, in the present tense",
                    "player: the penalty-box finisher", "the yard of space", "Third person but close in",
@@ -390,3 +396,27 @@ def test_each_persona_has_its_own_headline_detail_and_why(narrated):
             assert len(versions[persona]["headline"].split()) <= 10, (kind, persona)
             for key in ("detail", "why"):
                 assert len(versions[persona][key].split()) <= 30, (kind, persona, key)
+
+
+def test_analyst_voice_has_no_shape_vocabulary():
+    analyst = SYSTEM_PROMPT[SYSTEM_PROMPT.index("- analyst:"):SYSTEM_PROMPT.index("- casual:")]
+    for word in ("cover", "second ball", "screening", "line", "shape", "organiser"):
+        assert word not in analyst, word
+
+
+@pytest.mark.parametrize("text", ["The keeper saves it.", "Calderbrook lead 1-0 now.", "It is Rafe Ironsby's first.",
+                                  "That was a 0.252 xG chance."])
+def test_a_short_full_sentence_passes(goal, text):
+    moment, narrative = goal
+    version = json.loads(_good_reply(moment))["casual"] | {"detail": text}
+    assert check_version("casual", version, persona_inputs(moment, narrative))["detail"] == text
+
+
+def test_a_bare_number_reply_is_retried(goal):
+    moment, narrative = goal
+    bare = json.loads(_good_reply(moment))
+    for persona in PERSONAS:
+        bare[persona]["why"] = "0.252"
+    client = FakeClient(json.dumps(bare), _good_reply(moment))
+    versions = PersonaAgent(client, "m").versions(moment, narrative)
+    assert len(client.calls) == 2 and not any(v["fallback"] for v in versions.values())
