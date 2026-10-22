@@ -16,8 +16,8 @@ from typing import Any, AsyncIterator, Callable
 
 from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
 
-from deepkick.agents.narrative import NarrativeAgent
-from deepkick.agents.persona import PersonaAgent, select_overlay
+from deepkick.agents.narrative import NarrativeAgent, rate_limit_count, template_narrative
+from deepkick.agents.persona import PersonaAgent, select_overlay, template_versions
 from deepkick.contracts import PERSONAS
 from deepkick.moments import MomentDetector
 from deepkick.simulator import clock_seconds
@@ -25,7 +25,8 @@ from deepkick.stats import StatsAgent
 
 log = logging.getLogger("deepkick.orchestrator")
 
-WORKERS = 4
+WORKERS = 3  # 50,000 TPM fits about 25 calls a minute at ~2,000 tokens each
+MODEL_MIN_PRIORITY = 2  # lower-priority moments (milestones, high presses) use templates, not the model
 CAP_PER_MINUTE = 3  # overlays per minute of match clock
 PROTECTED = frozenset({"goal", "half_time", "full_time"})  # never dropped by the cap
 
@@ -52,7 +53,10 @@ class ExplainExecutor(Executor):
     @handler
     async def explain(self, job: dict, ctx: WorkflowContext[dict]) -> None:
         """Add the narrative to the job; the blocking model call runs in a thread so other moments keep going."""
-        narrative = await asyncio.to_thread(self.narrator.explain, job["moment"], job["snapshot"])
+        if not job["model"]:
+            narrative = template_narrative(job["moment"], job["snapshot"])
+        else:
+            narrative = await asyncio.to_thread(self.narrator.explain, job["moment"], job["snapshot"])
         await ctx.send_message(job | {"narrative": narrative})
 
 
@@ -66,7 +70,10 @@ class PersonaliseExecutor(Executor):
     @handler
     async def personalise(self, job: dict, ctx: WorkflowContext[Any, dict]) -> None:
         """Yield the job with its persona versions as the workflow's output."""
-        versions = await asyncio.to_thread(self.personas.versions, job["moment"], job["narrative"])
+        if not job["model"]:
+            versions = template_versions(job["moment"])
+        else:
+            versions = await asyncio.to_thread(self.personas.versions, job["moment"], job["narrative"])
         await ctx.yield_output(job | {"versions": versions})
 
 
@@ -128,18 +135,22 @@ class Orchestrator:
         while True:
             moment, snapshot = await self._queue.get()
             start, overlay, fallback = time.monotonic(), None, True
+            model = moment["priority"] >= MODEL_MIN_PRIORITY
             try:
                 explain, personalise = ExplainExecutor(self.narrator), PersonaliseExecutor(self.personas)
                 workflow = WorkflowBuilder(start_executor=explain).add_edge(explain, personalise).build()
-                job = (await workflow.run({"moment": moment, "snapshot": snapshot})).get_outputs()[0]
-                fallback = job["narrative"]["fallback"] or any(job["versions"][p]["fallback"] for p in PERSONAS)
+                job = (await workflow.run({"moment": moment, "snapshot": snapshot, "model": model})).get_outputs()[0]
+                fallback = model and (job["narrative"]["fallback"]
+                                      or any(job["versions"][p]["fallback"] for p in PERSONAS))
+                self.counts["model_explained"] += model and not job["narrative"]["fallback"]
                 overlay = select_overlay(moment, job["versions"], self.profile)
             except Exception:  # one broken moment must not stall the release of the others
                 log.exception("stage=orchestrator event_id=%s moment_id=%s failed; no overlay",
                               moment["event_id"], moment["moment_id"])
             self.counts["fallbacks"] += fallback
-            log.info("stage=orchestrator event_id=%s duration_ms=%.0f fallback=%s", moment["event_id"],
-                     (time.monotonic() - start) * 1000, "yes" if fallback else "no")
+            self.counts["templated"] += not model
+            log.info("stage=orchestrator event_id=%s duration_ms=%.0f fallback=%s model=%s", moment["event_id"],
+                     (time.monotonic() - start) * 1000, "yes" if fallback else "no", "yes" if model else "no")
             self._done[moment["moment_id"]] = overlay
             self._release()
             self._queue.task_done()
@@ -155,7 +166,7 @@ class Orchestrator:
 
     async def run(self, events: AsyncIterator[dict[str, Any]]) -> dict[str, Any]:
         """Consume the stream to its end, wait for the model work to finish, log and return the run summary."""
-        start = time.monotonic()
+        start, rate_limits_before = time.monotonic(), rate_limit_count()
         self._queue = asyncio.Queue()
         workers = [asyncio.create_task(self._worker()) for _ in range(self.workers)]
         async for event in events:
@@ -166,9 +177,11 @@ class Orchestrator:
             worker.cancel()
         summary = {"events": self.counts["events"], "moments": self.counts["moments"],
                    "emitted": self.counts["emitted"], "dropped": self.counts["dropped"],
-                   "fallbacks": self.counts["fallbacks"], "seconds": round(time.monotonic() - start, 2)}
+                   "model_explained": self.counts["model_explained"], "templated": self.counts["templated"],
+                   "fallbacks": self.counts["fallbacks"], "rate_limits": rate_limit_count() - rate_limits_before,
+                   "seconds": round(time.monotonic() - start, 2)}
         log.info("stage=orchestrator summary events=%d moments=%d overlays_emitted=%d overlays_dropped=%d "
-                 "fallbacks=%d wall_s=%.2f", *summary.values())
+                 "model_explained=%d templated=%d fallbacks=%d rate_limits=%d wall_s=%.2f", *summary.values())
         return summary
 
 
@@ -222,13 +235,15 @@ def main(argv: list[str] | None = None) -> None:
     source.add_argument("--live", action="store_true", help="read Azure Event Hubs (reads .env)")
     parser.add_argument("--speed", type=float, default=0.0, help="with --replay: multiple of real time (0 = no pacing)")
     parser.add_argument("--persona", choices=PERSONAS, default="analyst")
+    parser.add_argument("--workers", type=int, default=WORKERS, help="concurrent model workers")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     logging.getLogger("deepkick.orchestrator").setLevel(logging.INFO)
     load_dotenv()
 
     profile = {"persona": args.persona, "favourite_club": None, "favourite_player": None, "lang": "en"}
-    orchestrator = Orchestrator(profile=profile, emit=lambda overlay: print(json.dumps(overlay), flush=True))
+    orchestrator = Orchestrator(profile=profile, workers=args.workers,
+                                emit=lambda overlay: print(json.dumps(overlay), flush=True))
     events = live_events() if args.live else replay_events(args.replay, args.speed)
     summary = asyncio.run(orchestrator.run(events))
     print(json.dumps({"summary": summary}), file=sys.stderr)

@@ -19,7 +19,7 @@ Microsoft Agent Framework orchestrates stages 2–5 over one shared match state.
 
 - Python 3.11+, FastAPI, pytest
 - Azure Event Hubs (Basic tier: one consumer group, so one orchestrator reads the stream and fans out)
-- Microsoft Foundry: small model (gpt-4o-mini or what the student quota allows), tracing and evaluation
+- Microsoft Foundry: gpt-5-mini, Global Standard deployment at 50,000 tokens per minute; tracing and evaluation
 - Microsoft Agent Framework
 - Azure AI Translator: English, Spanish, Arabic
 - React + Vite frontend
@@ -29,7 +29,7 @@ Microsoft Agent Framework orchestrates stages 2–5 over one shared match state.
 
 - **Synthetic data only.** Fictional clubs, players, stadiums and referees from `data/league.json`. Never use real club names, player names, logos or league branding anywhere: code, data, UI or screenshots.
 - **Secrets stay in `.env`**, which is git-ignored. Never commit keys or connection strings. Keep `.env.example` with empty values up to date.
-- **Every model call has a timeout and a fallback.** On failure or timeout, return a template line built from the stats so an overlay still ships. Log the failure.
+- **Every model call has a timeout and a fallback.** On failure or timeout, return a template line built from the stats so an overlay still ships. Log the failure. A 429 (rate limit) is not a failure: it is retried with backoff (2 s, 4 s, 8 s, or the Retry-After header) without using up a normal attempt.
 - **Narratives cite only numbers present in the match state** passed to the model. The model never invents stats.
 - **The simulator takes a seed.** The same seed must produce the same match, so demos and tests repeat.
 

@@ -9,7 +9,7 @@ from deepkick.agents.narrative import (HEADLINE_MAX, LEAGUE_POSITIONS, POSITION_
                                        THEMES, TIMEOUT_S, NarrativeAgent, check_output, foundry_base_url, model_inputs,
                                        spell_out_positions, template_narrative, theme_for)
 from deepkick.moments import PRIORITY
-from tests.conftest import FakeClient, timeout_error
+from tests.conftest import FakeClient, rate_limit_error, timeout_error
 
 
 @pytest.fixture(scope="module")
@@ -365,3 +365,46 @@ def test_speed_and_sprint_templates_never_mix_up_ball_and_runner(every_type):
     sprint = template_narrative(*every_type["sprint_milestone"])
     assert "shot" in shot["headline"] and not any(w in shot["headline"] + shot["why_it_matters"] for w in ("run", "sprint"))
     assert "sprints" in sprint["headline"] and "shot" not in sprint["headline"] + sprint["why_it_matters"]
+
+
+@pytest.fixture
+def sleeps(monkeypatch):
+    """Record backoff waits instead of sleeping."""
+    import deepkick.agents.narrative as narrative
+
+    waits = []
+    monkeypatch.setattr(narrative, "_sleep", waits.append)
+    return waits
+
+
+def test_a_429_backs_off_then_the_model_reply_ships(goal, sleeps):
+    moment, snap = goal
+    client = FakeClient(rate_limit_error(), _good_reply(moment))
+    out = NarrativeAgent(client, "m").explain(moment, snap)
+    assert out["fallback"] is False and sleeps == [2.0] and len(client.calls) == 2
+
+
+def test_retry_after_header_is_respected(goal, sleeps):
+    moment, snap = goal
+    client = FakeClient(rate_limit_error(retry_after="5"), rate_limit_error(retry_after="soon"), _good_reply(moment))
+    assert NarrativeAgent(client, "m").explain(moment, snap)["fallback"] is False
+    assert sleeps == [5.0, 4.0]  # the header wins; an unreadable header falls back to the schedule
+
+
+def test_429s_do_not_use_up_the_normal_attempts(goal, sleeps):
+    moment, snap = goal
+    # Three 429s and one bad reply would exhaust two attempts if 429s counted; here the second attempt succeeds.
+    client = FakeClient(rate_limit_error(), rate_limit_error(), "not json", rate_limit_error(), _good_reply(moment))
+    out = NarrativeAgent(client, "m").explain(moment, snap)
+    assert out["fallback"] is False and sleeps == [2.0, 4.0, 8.0] and len(client.calls) == 5
+
+
+def test_429s_after_the_backoff_runs_out_count_as_attempts(goal, sleeps):
+    from deepkick.agents.narrative import rate_limit_count
+
+    moment, snap = goal
+    before = rate_limit_count()
+    client = FakeClient(*[rate_limit_error() for _ in range(5)])
+    assert NarrativeAgent(client, "m").explain(moment, snap) == template_narrative(moment, snap)
+    assert sleeps == [2.0, 4.0, 8.0] and len(client.calls) == 5  # three backoffs, then the two normal attempts
+    assert rate_limit_count() - before == 5

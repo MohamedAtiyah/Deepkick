@@ -49,3 +49,11 @@ class FakeClient:
 def timeout_error() -> openai.APITimeoutError:
     """The exception the OpenAI SDK raises when a request times out."""
     return openai.APITimeoutError(request=httpx2.Request("POST", "https://example.test/openai/v1/chat/completions"))
+
+
+def rate_limit_error(retry_after: str | None = None) -> openai.RateLimitError:
+    """The exception the OpenAI SDK raises on a 429, optionally with a Retry-After header in seconds."""
+    headers = {"retry-after": retry_after} if retry_after is not None else {}
+    request = httpx2.Request("POST", "https://example.test/openai/v1/chat/completions")
+    return openai.RateLimitError("rate limited", response=httpx2.Response(429, headers=headers, request=request),
+                                 body=None)

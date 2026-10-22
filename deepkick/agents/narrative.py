@@ -8,10 +8,13 @@ import logging
 import os
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 from urllib.parse import urlsplit
+
+from openai import RateLimitError
 
 from deepkick.simulator import load_league
 
@@ -23,6 +26,10 @@ TIMEOUT_S = 30.0  # per attempt; reasoning models such as gpt-5-mini need well o
 REASONING_EFFORT = "low"
 MAX_COMPLETION_TOKENS = 1500  # reasoning tokens count against this, so it is well above the reply's length
 ATTEMPTS = 2  # the first call plus one retry
+RATE_LIMIT_BACKOFF_S = (2.0, 4.0, 8.0)  # waits after a 429; these retries do not use up the ATTEMPTS
+_sleep = time.sleep  # tests swap this out so backoff waits take no real time
+_rate_limit_lock = threading.Lock()
+_rate_limits = 0
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 _SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
 _PROJECT_PATH = re.compile(r"^/api/projects/[^/]+")
@@ -266,19 +273,51 @@ def client_from_env(stage: str = "narrative") -> tuple[Any, str] | None:
     return OpenAI(base_url=base, api_key=key, timeout=TIMEOUT_S, max_retries=0), deployment
 
 
+def rate_limit_count() -> int:
+    """How many 429 (rate limit) responses the model has returned in this process so far."""
+    return _rate_limits
+
+
+def _retry_after(exc: RateLimitError) -> float | None:
+    """The 429's Retry-After header in seconds, or None if it is missing or not a number."""
+    try:
+        return float(exc.response.headers["retry-after"])
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
 def ask_with_retry(client: Any, deployment: str | None, timeout_s: float, system_prompt: str, user_content: str,
                    check: Callable[[str], dict[str, Any]], stage: str, event_id: str | None) -> dict[str, Any] | None:
-    """Call the chat model up to ATTEMPTS times; return `check(reply)` for the first reply that passes, else None."""
+    """Call the chat model up to ATTEMPTS times; return `check(reply)` for the first reply that passes, else None.
+
+    A 429 is retried after RATE_LIMIT_BACKOFF_S (or the Retry-After header) without using up an attempt;
+    only once those waits run out does a 429 count as a failed attempt.
+    """
+    global _rate_limits
+    stage_log = logging.getLogger(f"deepkick.{stage}")
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_content}]
-    for attempt in range(1, ATTEMPTS + 1):
+    attempt, backoffs = 1, iter(RATE_LIMIT_BACKOFF_S)
+    while attempt <= ATTEMPTS:
         try:
             response = client.chat.completions.create(
                 model=deployment, messages=messages, response_format={"type": "json_object"},
                 reasoning_effort=REASONING_EFFORT, max_completion_tokens=MAX_COMPLETION_TOKENS, timeout=timeout_s)
             return check(response.choices[0].message.content)
+        except RateLimitError as exc:
+            with _rate_limit_lock:
+                _rate_limits += 1
+            backoff = next(backoffs, None)
+            if backoff is not None:
+                wait = _retry_after(exc) or backoff
+                stage_log.warning("stage=%s event_id=%s rate_limited=429 retry_in_s=%.1f", stage, event_id, wait)
+                _sleep(wait)
+                continue
+            stage_log.warning("stage=%s event_id=%s attempt=%d failed: still rate limited after backoff",
+                              stage, event_id, attempt)
         except Exception as exc:  # timeouts, API errors and rejected replies all get the retry, then the template
-            logging.getLogger(f"deepkick.{stage}").warning("stage=%s event_id=%s attempt=%d failed: %s: %s",
-                                                           stage, event_id, attempt, type(exc).__name__, exc)
+            stage_log.warning("stage=%s event_id=%s attempt=%d failed: %s: %s",
+                              stage, event_id, attempt, type(exc).__name__, exc)
+        attempt += 1
     return None
 
 

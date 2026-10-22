@@ -121,7 +121,7 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 - **Position codes:** after a reply passes the checks, any standalone position code the league uses (from `data/league.json`, such as `RCB` or `ST`) left in the headline or `why_it_matters` is replaced with words ("right centre-back", "striker"). Club codes such as `ASH` and `CAL` are left alone.
 - **What is checked:** the validator guards the numbers and the evidence, plus the reply's shape and length. The wording rules above are limited by the prompt only, so a reply can still use a raw term or make an unsupported claim without any number in it.
 - **Model call:** Chat Completions with JSON output, `reasoning_effort="low"` and `max_completion_tokens=1500` (reasoning tokens count against that cap).
-- **Failure recovery:** each call has a 30-second timeout and one retry, so the worst case is about a minute before the template is used. Reasoning models such as gpt-5-mini answer a one-word probe in about 3 s but need much longer than 4 s on a real moment. After a timeout, an API error or a rejected reply on both tries, the agent returns a template narrative built straight from the moment facts, with `fallback: true`. It never raises. Every moment type has a template, and the tests run every template through the same number check as the model.
+- **Failure recovery:** each call has a 30-second timeout and one retry, so the worst case is about a minute before the template is used. Reasoning models such as gpt-5-mini answer a one-word probe in about 3 s but need much longer than 4 s on a real moment. A 429 (rate limit) is handled separately. It is retried after 2 s, 4 s and then 8 s, or after the Retry-After header when the response has one, and those retries don't use up one of the two normal attempts. Only a 429 after all three waits counts as a failed attempt, and each 429 is logged and counted. After a timeout, an API error or a rejected reply on both tries, the agent returns a template narrative built straight from the moment facts, with `fallback: true`. It never raises. Every moment type has a template, and the tests run every template through the same number check as the model.
 - **Logging:** at startup the agent logs the base URL path and the deployment once (`stage=narrative foundry base_path=… deployment=…`), never the key or host. Each handoff logs `stage=narrative event_id=… duration_ms=… fallback=yes|no`. Each failed attempt is logged with its reason.
 
 ```bash
@@ -141,17 +141,23 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 - **Interpret in line:** each event goes through `StatsAgent.update` and `MomentDetector.detect` right away. Both are pure Python and take well under a millisecond, so ingest never waits for a model.
 - **Overlay cap:** a match minute's moments are held until the clock moves past that minute, then cut to at most 3, dropping the lowest moment priority first (ties keep the earlier moment). Goals, half-time and full-time are never dropped. Each drop is logged with its moment id and priority. The cap runs before any model call, so a dropped moment costs nothing.
 - **Explain and Personalise off the hot path:**
-  - **Workers:** kept moments go on a queue served by 4 workers.
+  - **Workers:** kept moments go on a queue served by 3 workers (`--workers` to change it). The gpt-5-mini deployment allows 50,000 tokens a minute, or about 25 calls at roughly 2,000 tokens each, so 3 concurrent workers stay inside it.
+  - **Priority 2 and up only:** only moments of detector priority 2 or more (goals, big chances, pressure spells, momentum swings, half-time, full-time) call the model. Priority 1 moments (sprint, speed and distance milestones, high press wins) use the existing templates, so seed 42 makes about 36 model calls instead of about 70.
   - **Per-moment workflow:** each worker runs that moment through its own Agent Framework workflow: `ExplainExecutor` (Narrative Agent), then `PersonaliseExecutor` (Persona Agent). The blocking model calls run in threads.
   - **Why it's needed:** a narrative call takes 6–10 s and a persona call 6–12 s, and a seed-42 match has 35 moments, so running them one after another would take about 10 minutes.
   - **Timeouts and errors:** a timeout or error in one moment uses that moment's template fallback, and the other workers carry on.
 - **Clock order:** finished overlays are buffered and released in match-clock (`show_at_ms`) order, even when a later moment finishes first.
 - **Half-time and full-time:** these pass through as normal overlays until the recap agent exists.
 - **Shared state:** `Orchestrator.snapshot()` returns the Stats Agent snapshot and `Orchestrator.history()` the released overlays. These are ready for the FastAPI `/state` and `/recap` endpoints, which aren't built yet.
-- **Logging:** each moment's handoff logs `stage=orchestrator event_id=… duration_ms=… fallback=yes|no`. The run ends with `summary events=… moments=… overlays_emitted=… overlays_dropped=… fallbacks=… wall_s=…`, which is also printed as JSON on stderr.
+- **Logging:** each moment's handoff logs `stage=orchestrator event_id=… duration_ms=… fallback=yes|no model=yes|no`. The run ends with `summary events=… moments=… overlays_emitted=… overlays_dropped=… model_explained=… templated=… fallbacks=… rate_limits=… wall_s=…`, which is also printed as JSON on stderr.
+  - `model_explained`: the model wrote the narrative.
+  - `templated`: priority 1, so no model call.
+  - `fallbacks`: the model was asked, but at least one template was used.
+  - `rate_limits`: how many 429s the run hit.
 
 ```bash
-# Replay a match file: needs no Azure at all (without FOUNDRY_* in .env, narratives and personas use templates)
+# Replay a match file: needs no Azure at all (without FOUNDRY_* in .env, narratives and personas use templates).
+# Add --workers N to change the number of concurrent model workers (default 3).
 .venv/bin/python -m deepkick.orchestrator --replay tests/fixtures/replay_ASH-CAL-42.jsonl --persona analyst
 
 # Replay paced at 30x real time
@@ -178,7 +184,11 @@ Overlays print to stdout as JSON lines.
 - goals, half-time and full-time never dropped;
 - the same overlays for the same seed with 1 or 4 workers;
 - handoff and summary logging;
+- a 429 on every call backing off and the overlays still shipping model-written;
+- priority 1 moments never calling the model;
 - the replay CLI running with no Azure settings.
+
+The 429 backoff itself (schedule, Retry-After, and not using up the normal attempts) is tested in [`tests/test_narrative.py`](tests/test_narrative.py).
 
 ## 5. Personalise: Persona Agent
 
