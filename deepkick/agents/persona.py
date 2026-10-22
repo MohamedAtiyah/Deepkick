@@ -215,25 +215,106 @@ def casual_template(moment: dict[str, Any]) -> dict[str, str]:
             "detail": f"{team or 'The match'} moves on.", "why": f"{who or 'The match'} is involved."}
 
 
+def analyst_headline(moment: dict[str, Any]) -> str:
+    """A precise analyst headline built from the moment facts, carrying the moment's key number."""
+    f, kind = moment["facts"], moment["type"]
+    team = CLUB_NAMES.get(moment["team"], moment["team"]) if moment["team"] else ""
+    who = moment["player"]["name"] if moment["player"] else team
+    if kind in ("half_time", "full_time"):
+        (home, h), (away, a) = f["score"].items()
+        whistle = "HT" if kind == "half_time" else "FT"
+        return f"{whistle} {home} {h}-{a} {away}, xG {f['teams'][home]['xg']} to {f['teams'][away]['xg']}"
+    if kind == "momentum_swing":
+        return f"{CLUB_NAMES[f['to_team']]} take {f['momentum'][f['to_team']]['value']}% of the momentum"
+    if kind == "goal":
+        return f"{who} scores: {f['xg']} xG from {f['distance_m']} m"
+    if kind == "big_chance":
+        return f"Big chance: {f['xg']} xG for {who}"
+    if kind == "pressure_spell":
+        return f"{team}: {f['shots']} shots, {f['xg']} xG in {f['window_minutes']} minutes"
+    if kind == "high_press_win":
+        return f"{who} wins the ball {f['x_m']} m up the pitch"
+    if kind == "speed_milestone":
+        return f"{f['shot_speed_kmh']} km/h shot from {f['shot_distance_m']} m"
+    if kind == "sprint_milestone":
+        return f"{f['run_speed_kmh']} km/h over a {f['run_distance_m']} m run"
+    if kind == "distance_milestone":
+        return f"{who} reaches {f['distance_m']} m covered"
+    if kind == "pass_milestone":
+        return f"{who}: {f['passes']} passes at {f['pass_accuracy_pct']}% accuracy"
+    return f"{kind.replace('_', ' ').capitalize()} at {moment['match_clock']}"
+
+
+def player_template(moment: dict[str, Any]) -> dict[str, str]:
+    """A player-focus version built from the moment facts, around the player's name (or the club's, if none)."""
+    f, kind, clock = moment["facts"], moment["type"], moment["match_clock"]
+    team = CLUB_NAMES.get(moment["team"], moment["team"]) if moment["team"] else ""
+    who = moment["player"]["name"] if moment["player"] else team
+    if kind in ("half_time", "full_time"):
+        (home, _), (away, _) = f["score"].items()
+        hn, an, ht, at = CLUB_NAMES[home], CLUB_NAMES[away], f["teams"][home], f["teams"][away]
+        return {"headline": f"{hn} v {an} {'at the break' if kind == 'half_time' else 'at the final whistle'}",
+                "detail": f"{hn} had {ht['shots_on_target']} shots on target to "
+                          f"{_possessive(an)} {at['shots_on_target']}.",
+                "why": f"{hn} had {ht['possession_pct']}% of the ball."}
+    if kind == "momentum_swing":
+        to, m = CLUB_NAMES[f["to_team"]], f["momentum"][f["to_team"]]
+        return {"headline": f"Momentum with {to}",
+                "detail": f"{to} made {m['final_third_entries']} final-third entries in {f['window_minutes']} minutes.",
+                "why": f"{to} had {_count(m['shots'], 'shot')} in that spell."}
+    if kind == "goal":
+        nth = _ORDINAL[f["player_goals"] - 1] if 1 <= f["player_goals"] <= len(_ORDINAL) else f"{f['player_goals']}th"
+        return {"headline": f"{_possessive(who)} {nth} goal of the match",
+                "detail": f"{who} finished a {f['xg']} xG chance from {f['distance_m']} m.",
+                "why": f"{who} now has {_count(f['player_goals'], 'goal')} in this match."}
+    if kind == "big_chance":
+        return {"headline": f"{who} goes close",
+                "detail": f"{_possessive(who)} {f['xg']} xG chance from {f['distance_m']} m was "
+                          f"{_OUTCOME[f['outcome']]}.",
+                "why": f"{who} had the chance at {clock}."}
+    if kind == "pressure_spell":
+        return {"headline": f"{who} adds to {_possessive(team)} pressure",
+                "detail": f"{who} took the latest of {_possessive(team)} {f['shots']} shots.",
+                "why": f"{_possessive(who)} shot came at {clock}."}
+    if kind == "high_press_win":
+        return {"headline": f"{who} wins it high up the pitch",
+                "detail": f"{who} won it back from {f['target']} {f['x_m']} m up the pitch.",
+                "why": f"{who} pressed at {clock}."}
+    if kind == "speed_milestone":
+        return {"headline": f"{_possessive(who)} {f['shot_speed_kmh']} km/h shot",
+                "detail": f"{_possessive(who)} shot from {f['shot_distance_m']} m was {_OUTCOME[f['outcome']]}.",
+                "why": f"{_possessive(who)} fastest shot so far is {f['player_top_shot_speed_kmh']} km/h."}
+    if kind == "sprint_milestone":
+        return {"headline": f"{who} at full speed: {f['run_speed_kmh']} km/h",
+                "detail": f"{who} covered {f['run_distance_m']} m on the run.",
+                "why": f"{who} hit that speed at {clock}."}
+    if kind == "distance_milestone":
+        return {"headline": f"{_possessive(who)} {f['milestone_km']} km mark",
+                "detail": f"{who} has run {f['distance_m']} m in this match.",
+                "why": f"{who} reached it at {clock}."}
+    if kind == "pass_milestone":
+        return {"headline": f"{who}: {f['passes']} passes and counting",
+                "detail": f"{who} has completed {f['passes_completed']} of {f['passes']} passes.",
+                "why": f"{_possessive(who)} pass accuracy is {f['pass_accuracy_pct']}%."}
+    return {"headline": f"{who or 'The match'} at {clock}", "detail": f"{who or 'The match'} is involved.",
+            "why": f"Logged at {clock}."}
+
+
 def template_versions(moment: dict[str, Any]) -> dict[str, Any]:
-    """Build all three versions from the moment facts alone, each with `fallback: true`.
+    """Build all three versions from the moment facts alone, each with its own headline and `fallback: true`.
 
     Nothing comes from the narrative, which may be model-written, so a templated version is wholly template.
     """
     narrative = template_narrative(moment, {"teams": {cid: {"name": name} for cid, name in CLUB_NAMES.items()}})
-    headline, why = narrative["headline"], narrative["why_it_matters"]
     numbers = ", ".join(key_facts(moment, narrative["evidence"]))
-    casual = casual_template(moment)
-    who = moment["player"]["name"] if moment["player"] else None
-    # The casual headline names the player for most types; otherwise lead with the name. Clipping a headline
-    # that starts with the name can never cut the name.
-    player_headline = (headline if not who or who in headline else
-                       casual["headline"] if who in casual["headline"] else _clip(f"{who}: {casual['headline']}"))
+    why = narrative["why_it_matters"]
+    casual, player = casual_template(moment), player_template(moment)
     return {
-        "analyst": {"headline": headline, "detail": f"Key numbers: {numbers}." if numbers else why, "why": why,
-                    "fallback": True},
+        "analyst": {"headline": _clip(analyst_headline(moment)),
+                    "detail": f"Key numbers: {numbers}." if numbers else why, "why": why, "fallback": True},
         "casual": casual | {"headline": _clip(casual["headline"]), "fallback": True},
-        "player": {"headline": player_headline, "detail": why, "why": casual["why"], "fallback": True},
+        # Player headlines start with the name, so clipping can never cut it.
+        "player": player | {"headline": _clip(player["headline"]), "fallback": True},
     }
 
 
