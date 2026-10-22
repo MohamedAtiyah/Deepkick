@@ -1,6 +1,7 @@
 """Tests for the Persona Agent and viewer selection with a mocked Foundry chat client and the seed-42 replay."""
 
 import json
+import re
 import logging
 
 import pytest
@@ -32,10 +33,11 @@ def _good_reply(moment):
     name, f = moment["player"]["name"], moment["facts"]
     return json.dumps({
         "analyst": {"headline": f"{name} scores from {f['distance_m']} m",
-                    "detail": f"A {f['xg']} xG chance, shot number {f['team_shots']} for Calderbrook Athletic.",
+                    "detail": f"It was a {f['xg']} xG chance, shot number {f['team_shots']} for Calderbrook Athletic.",
                     "why": "It makes the score ASH 0-1 CAL."},
         "casual": {"headline": f"{name} gives Calderbrook Athletic the lead",
-                   "detail": "A close-range finish from the striker.", "why": "It is the first goal of the match."},
+                   "detail": "It is a close-range finish from the striker.",
+                   "why": "It is the first goal of the match."},
         "player": {"headline": f"{name} opens the scoring", "detail": f"{name} finished from {f['distance_m']} m.",
                    "why": f"It is {name}'s first goal of the match."},
     })
@@ -128,7 +130,10 @@ def test_timeout_falls_back_to_templates_after_one_retry(goal, caplog):
 
 
 @pytest.mark.parametrize("persona, field, text, problem", [
-    ("analyst", "detail", "A 0.9 xG chance, the best of the match.", "numbers not in the inputs"),
+    ("analyst", "detail", "It was a 0.9 xG chance, the best of the match.", "numbers not in the inputs"),
+    ("analyst", "why", "0.215", "sentence of at least 4 words with a verb"),  # a bare number
+    ("casual", "detail", "Big chance.", "sentence of at least 4 words with a verb"),  # a two-word fragment
+    ("player", "why", "A 0.252 xG chance.", "sentence of at least 4 words with a verb"),  # four words, no verb
     ("player", "why", "It is Rafe Ironsby's 12th goal this season.", "numbers not in the inputs"),
     ("player", "headline", "A cool finish to open the scoring", "player headline must name"),
     ("casual", "headline", "", "non-empty"),
@@ -199,9 +204,9 @@ def test_narrative_text_is_not_a_number_source(goal):
 
 def test_position_codes_in_replies_are_spelled_out(goal):
     moment, narrative = goal
-    version = json.loads(_good_reply(moment))["casual"] | {"detail": "A close-range finish from the ST."}
+    version = json.loads(_good_reply(moment))["casual"] | {"detail": "It is a close-range finish from the ST."}
     assert check_version("casual", version, persona_inputs(moment, narrative))["detail"] == \
-        "A close-range finish from the striker."
+        "It is a close-range finish from the striker."
 
 
 def test_templates_pass_the_same_checks_for_every_moment(narrated):
@@ -235,8 +240,57 @@ def test_key_facts_put_the_moments_own_team_first(narrated):
 
 def test_prompt_rules_on_causation_effort_and_casual_numbers():
     for phrase in ("Never say one event caused another unless the facts say so",
-                   "no claims about fatigue, confidence, intent, form or effort", "at most one or two numbers"):
+                   "no claims about fatigue, confidence, intent, form or effort", "at most\n  two numbers"):
         assert phrase in SYSTEM_PROMPT, phrase
+
+
+def test_prompt_gives_each_persona_its_own_voice():
+    for phrase in ("analyst: reads the game only through what is measured", "expected goals, shot counts, shot distance",
+                   "possession, pass accuracy, momentum and speed", "Blunt and direct, mildly exasperated",
+                   "cites the one number", "Never use shape words such as cover, line, screening or second ball",
+                   "a full sentence of at least 4 words with a verb",
+                   "casual: an attacker's eye for flair and space", "the run before the pass",
+                   "Warm, economical and admiring, in the present tense",
+                   "player: the penalty-box finisher", "the yard of space", "Third person but close in",
+                   "Ruthless about a miss,\n  delighted by a clean finish",
+                   "never\nstate that a player was out of position or switched off"):
+        assert phrase in SYSTEM_PROMPT, phrase
+
+
+def _prompt_examples():
+    """The worked examples in the prompt, as the dicts the model is asked to match."""
+    decoder, found, at = json.JSONDecoder(), [], 0
+    while (at := SYSTEM_PROMPT.find('{"analyst"', at)) != -1:
+        example, at = decoder.raw_decode(SYSTEM_PROMPT, at)
+        found.append(example)
+    return found
+
+
+def test_prompt_examples_pass_the_same_checks_as_the_model(narrated):
+    goal = next((m, n) for m, n in narrated if m["type"] == "goal")
+    saved = next((m, n) for m, n in narrated if m["type"] == "big_chance" and m["facts"]["outcome"] == "saved")
+    examples = _prompt_examples()
+    assert len(examples) == 2
+    for example, (moment, narrative) in zip(examples, (goal, saved)):
+        assert moment["player"]["name"] in example["player"]["headline"]
+        for persona in PERSONAS:
+            check_version(persona, example[persona], persona_inputs(moment, narrative))  # numbers come from the facts
+            assert len(example[persona]["headline"].split()) <= 10
+            assert all(len(example[persona][k].split()) <= 30 for k in ("detail", "why"))
+            text = " ".join(example[persona].values())
+            assert not re.search(r"\b(he|she|his|her)\b", text, re.I), text
+
+
+def test_prompt_names_only_fictional_league_players_and_clubs():
+    from deepkick.simulator import load_league
+
+    league = load_league()
+    names = {p["name"] for c in league["clubs"] for p in c["starters"] + c["bench"]}
+    examples = " ".join(json.dumps(e) for e in _prompt_examples())
+    assert {"Rafe Ironsby", "Soren Fallowmere"} <= names
+    capitalised_pairs = set(re.findall(r"\b[A-Z][a-z]+ [A-Z][a-z]+\b", examples))
+    clubs = {c["name"] for c in league["clubs"]}
+    assert capitalised_pairs <= names | clubs, capitalised_pairs - names - clubs
 
 
 FILLER = ("The scoreboard tells the story", "It could shape what comes next", "A personal landmark in this match",
@@ -342,3 +396,27 @@ def test_each_persona_has_its_own_headline_detail_and_why(narrated):
             assert len(versions[persona]["headline"].split()) <= 10, (kind, persona)
             for key in ("detail", "why"):
                 assert len(versions[persona][key].split()) <= 30, (kind, persona, key)
+
+
+def test_analyst_voice_has_no_shape_vocabulary():
+    analyst = SYSTEM_PROMPT[SYSTEM_PROMPT.index("- analyst:"):SYSTEM_PROMPT.index("- casual:")]
+    for word in ("cover", "second ball", "screening", "line", "shape", "organiser"):
+        assert word not in analyst, word
+
+
+@pytest.mark.parametrize("text", ["The keeper saves it.", "Calderbrook lead 1-0 now.", "It is Rafe Ironsby's first.",
+                                  "That was a 0.252 xG chance."])
+def test_a_short_full_sentence_passes(goal, text):
+    moment, narrative = goal
+    version = json.loads(_good_reply(moment))["casual"] | {"detail": text}
+    assert check_version("casual", version, persona_inputs(moment, narrative))["detail"] == text
+
+
+def test_a_bare_number_reply_is_retried(goal):
+    moment, narrative = goal
+    bare = json.loads(_good_reply(moment))
+    for persona in PERSONAS:
+        bare[persona]["why"] = "0.252"
+    client = FakeClient(json.dumps(bare), _good_reply(moment))
+    versions = PersonaAgent(client, "m").versions(moment, narrative)
+    assert len(client.calls) == 2 and not any(v["fallback"] for v in versions.values())
