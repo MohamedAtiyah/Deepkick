@@ -133,9 +133,52 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 
 **Tests:** [`tests/test_narrative.py`](tests/test_narrative.py) replaces the model client with a fake. It covers a good reply, invented numbers in text and in evidence, a timeout, endpoint normalisation (bare host, project endpoint and target URIs), player names in the template text, malformed JSON and bad fields, a retry that recovers, missing settings, and the template for every moment type.
 
-## 4. Render: overlay API and broadcast view
+## 4. Render: orchestrator (overlay API and broadcast view next)
 
-Next up, not built yet. `deepkick/api.py` will stream overlays over a FastAPI WebSocket (`/ws`) and serve `/state` and `/recap`. The React broadcast view in `web/` will draw each overlay at its `show_at_ms` for its `duration_ms`. Overlays already follow the contract checked by `validate_overlay` in [`deepkick/contracts.py`](deepkick/contracts.py).
+[`deepkick/orchestrator.py`](deepkick/orchestrator.py) runs stages 2–5 over one shared match state with [Microsoft Agent Framework](https://pypi.org/project/agent-framework-core/) (`agent-framework-core` only; the `agent-framework` meta package pulls about 150 dependencies).
+
+- **One consumer:** Event Hubs is on the Basic tier with one consumer group, so a single orchestrator reads the stream (`$Default`) and fans out in process.
+- **Interpret in line:** each event goes through `StatsAgent.update` and `MomentDetector.detect` right away. Both are pure Python and take well under a millisecond, so ingest never waits for a model.
+- **Overlay cap:** a match minute's moments are held until the clock moves past that minute, then cut to at most 3, dropping the lowest moment priority first (ties keep the earlier moment). Goals, half-time and full-time are never dropped. Each drop is logged with its moment id and priority. The cap runs before any model call, so a dropped moment costs nothing.
+- **Explain and Personalise off the hot path:**
+  - **Workers:** kept moments go on a queue served by 4 workers.
+  - **Per-moment workflow:** each worker runs that moment through its own Agent Framework workflow: `ExplainExecutor` (Narrative Agent), then `PersonaliseExecutor` (Persona Agent). The blocking model calls run in threads.
+  - **Why it's needed:** a narrative call takes 6–10 s and a persona call 6–12 s, and a seed-42 match has 35 moments, so running them one after another would take about 10 minutes.
+  - **Timeouts and errors:** a timeout or error in one moment uses that moment's template fallback, and the other workers carry on.
+- **Clock order:** finished overlays are buffered and released in match-clock (`show_at_ms`) order, even when a later moment finishes first.
+- **Half-time and full-time:** these pass through as normal overlays until the recap agent exists.
+- **Shared state:** `Orchestrator.snapshot()` returns the Stats Agent snapshot and `Orchestrator.history()` the released overlays. These are ready for the FastAPI `/state` and `/recap` endpoints, which aren't built yet.
+- **Logging:** each moment's handoff logs `stage=orchestrator event_id=… duration_ms=… fallback=yes|no`. The run ends with `summary events=… moments=… overlays_emitted=… overlays_dropped=… fallbacks=… wall_s=…`, which is also printed as JSON on stderr.
+
+```bash
+# Replay a match file: needs no Azure at all (without FOUNDRY_* in .env, narratives and personas use templates)
+.venv/bin/python -m deepkick.orchestrator --replay tests/fixtures/replay_ASH-CAL-42.jsonl --persona analyst
+
+# Replay paced at 30x real time
+.venv/bin/python -m deepkick.orchestrator --replay tests/fixtures/replay_ASH-CAL-42.jsonl --speed 30
+
+# Live: read Azure Event Hubs from the latest event until full-time (start this, then the simulator with --send)
+.venv/bin/python -m deepkick.orchestrator --live
+```
+
+Overlays print to stdout as JSON lines.
+
+**Azure services by stage:**
+- **Ingest (live mode):** Azure Event Hubs, using `EVENTHUB_CONNECTION_STRING` and `EVENTHUB_NAME`.
+- **Interpret:** none.
+- **Explain and Personalise:** the Microsoft Foundry model deployment (`FOUNDRY_*`).
+- **Orchestration:** Microsoft Agent Framework, which runs in process.
+
+**Next:** the FastAPI WebSocket (`/ws`) that streams these overlays, `/state` and `/recap`, and the React broadcast view that draws each overlay at its `show_at_ms` for its `duration_ms`.
+
+**Tests:** [`tests/test_orchestrator.py`](tests/test_orchestrator.py) uses the seed-42 replay and a fake model client with controllable delays, and needs no network. It covers:
+- overlays in match-clock order when work finishes out of order;
+- one moment's model timeout not stalling the others;
+- the cap holding on the replay and in isolation;
+- goals, half-time and full-time never dropped;
+- the same overlays for the same seed with 1 or 4 workers;
+- handoff and summary logging;
+- the replay CLI running with no Azure settings.
 
 ## 5. Personalise: Persona Agent
 
