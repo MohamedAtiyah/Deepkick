@@ -66,6 +66,7 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 - **Player stats:** actions, passes, shots, goals, xG, top shot speed, top run speed, tackles, pressures and distance covered.
 - **Momentum:** each team's shots, xG, possession share and final-third entries (completed passes or carries from before x = 70 m to beyond it) over the last 5 minutes of match clock, plus a momentum `value`: the team's share (0–100) of `2 × shots + 10 × xG + final-third entries + 5 × possession share`. The two teams' values add up to 100.
 - **Live context:** the current `pressure_index` (pressure on the team in possession, 0–1) and `possession_team`.
+- **Ball:** `ball` gives where the ball is after the latest event and who has it: `{team, player_id, x, y}` in that team's attacking frame. It follows the receiver of a completed pass and the carrier of a run; off-ball runs and the 5-minute tracking summaries don't move it. The broadcast view uses it to draw the players; the model never sees it.
 - **Failure recovery:** events are validated against the contract. A malformed event is skipped, and a redelivered event (Event Hubs delivers at least once) is ignored by `event_id`. Neither changes the state, and both are logged with `fallback=yes`.
 - **Logging:** each handoff logs `stage=stats event_id=… duration_ms=… fallback=yes|no`.
 
@@ -196,7 +197,7 @@ The 429 backoff itself (schedule, Retry-After, and not using up the normal attem
 
 | Endpoint | What it returns |
 |---|---|
-| `GET /state` | the current match snapshot: score, clock, status, team stats with momentum, player stats |
+| `GET /state` | the current match snapshot: score, clock, status, ball position, team stats with momentum, player stats |
 | `GET /recap?persona=&limit=` | overlays released so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona), at most `limit` |
 | `WS /ws?persona=&club=&player=&lang=` | first every overlay already released for that viewer (so a late viewer isn't blank), then each new overlay as it's released |
 | `GET /healthz` | the run status (`not_started`, `running`, `finished`, `failed`), where each stage gets its input (`replay` or `live`; `foundry` or `templates`), and the run counters |
@@ -235,6 +236,13 @@ curl localhost:8000/healthz
 [`web/`](web) is a small React app built with Vite that draws the broadcast from the overlay API. It has five components, no state library and no UI framework, and all its CSS lives in the project. Club names, colours and squads come from the API and [`data/league.json`](data/league.json); there are no logos or real branding.
 
 - **Match frame:** a video-less pitch with the scoreboard: clubs in their fictional colours, score, match clock and period, polled from `/state` every second.
+  - **Clock:** ticks smoothly between polls, at the rate the last two polls showed. A 30x replay counts up visibly instead of jumping 30 seconds at a time, and the clock stops at half-time and full-time.
+  - **Pitch:** drawn to real proportions on the data's 105 × 68 metre system, as an SVG whose units are metres. It has goals 7.32 m wide outside each goal line, 40.3 × 16.5 m penalty areas, 18.3 × 5.5 m six-yard boxes, penalty spots 11 m out, D arcs and the centre circle at 9.15 m, 1 m corner arcs, the halfway line and the centre spot. The stripes are mown. The pitch keeps its landscape aspect ratio at any container width.
+  - **Players:** all 22 starters, in club colours with shirt numbers. Markers are placed by converting metres to percentages of the same box, with the home side attacking to the right. The layout rules live in [`web/src/pitchLayout.js`](web/src/pitchLayout.js):
+    - Everyone sits on their formation slot from `data/league.json`, and the player on the ball is drawn at the event's coordinates. The events only carry coordinates for the player involved.
+    - Both teams share one small shift toward the ball, capped at 6 m along the pitch and 3 m across, so the shape slides as a unit. Defenders move half of it, midfielders three quarters and forwards all of it; keepers stay on their line, moving at most 2 m.
+    - Markers that land within 3 m of each other are nudged apart, but the player on the ball never moves.
+  - **Movement:** players ease to their spots over 400 ms and the ball glides over 600 ms, so nothing teleports.
 - **Overlays:** overlays from `/ws` appear as lower thirds showing their headline, detail and why. Each stays for its own `duration_ms` and never appears before the match clock reaches its `show_at_ms`.
   - **Two at once:** at most two are on screen; the rest queue in clock order.
   - **Late viewers:** the queue keeps only the newest 4, so a late viewer's backlog doesn't play for minutes. The full history is in the recap.
@@ -250,6 +258,9 @@ REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl .venv/bin/uvicorn deepkick.ap
 
 # Terminal 2: the broadcast view on http://localhost:5173
 cd web && npm install && npm run dev
+
+# The pitch layout rules have tests (Node's built-in runner, no extra dependency)
+cd web && npm test
 ```
 
 In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/recap`, `/healthz` and `/ws` to `localhost:8000`. `npm run build` writes a static site to `web/dist/` for Azure Static Web Apps.

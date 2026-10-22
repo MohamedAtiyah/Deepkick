@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { momentKey, useMatchState, useOverlaySocket } from "./live.js";
 import Scoreboard from "./Scoreboard.jsx";
+import Pitch from "./Pitch.jsx";
 import OverlayStack from "./OverlayStack.jsx";
 import Panel from "./Panel.jsx";
 import Recap from "./Recap.jsx";
@@ -20,7 +21,7 @@ export default function App() {
     <div className="app">
       <main className="frame">
         <Scoreboard state={state} />
-        <div className="pitch" aria-hidden="true" />
+        <Pitch state={state} />
         <OverlayStack overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} />
       </main>
       <aside className="side">
