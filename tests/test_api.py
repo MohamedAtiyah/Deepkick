@@ -133,9 +133,24 @@ def test_default_app_replays_REPLAY_FILE_with_no_azure(monkeypatch):
     for key in ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY", "EVENTHUB_CONNECTION_STRING"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("REPLAY_FILE", str(REPLAY_PATH))
+    monkeypatch.setenv("REPLAY_SPEED", "0")  # unpaced, so the test is fast
     with TestClient(create_app()) as client:
         _wait_until(lambda: client.get("/healthz").json()["status"] == "finished")
         health = client.get("/healthz").json()
     assert health["stages"] == {"ingest": "replay", "interpret": "in_process", "explain": "templates",
                                 "personalise": "templates"}
     assert health["summary"]["emitted"] == TOTAL
+
+
+def test_default_app_paces_the_replay_so_state_tracks_the_stream(monkeypatch):
+    import dotenv
+
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
+    for key in ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY", "REPLAY_SPEED"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("REPLAY_FILE", str(REPLAY_PATH))
+    with TestClient(create_app()) as client:
+        time.sleep(1.0)  # 30 match seconds at the default 30x
+        state, health = client.get("/state").json(), client.get("/healthz").json()
+    assert health["status"] == "running"
+    assert state["status"] == "kickoff" and "00:20" <= state["match_clock"] <= "01:00"  # not 90:00 and full time

@@ -224,3 +224,19 @@ def test_priority_one_moments_never_call_the_model(sleeps):
 def test_default_worker_count_is_three():
     client = SlowClient()
     assert Orchestrator(NarrativeAgent(client, "m"), PersonaAgent(client, "m")).workers == WORKERS == 3
+
+
+def test_replay_is_paced_against_the_match_clock(tmp_path):
+    lines = REPLAY_PATH.read_text().splitlines()
+    head = [line for line in lines if json.loads(line)["match_clock"] <= "02:00"]
+    short = tmp_path / "first-two-minutes.jsonl"
+    short.write_text("\n".join(head) + "\n")
+
+    async def drain(speed):
+        start = time.monotonic()
+        events = [e async for e in replay_events(short, speed)]
+        return len(events), time.monotonic() - start
+
+    count, paced = asyncio.run(drain(600))  # 120 match seconds at 600x is 0.2 s
+    assert count == len(head) and 0.15 < paced < 1.0
+    assert asyncio.run(drain(0))[1] < 0.15  # speed 0 stays unpaced for fast tests

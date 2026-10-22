@@ -35,7 +35,7 @@ def create_app(orchestrator: Orchestrator | None = None,
         replay = os.environ.get("REPLAY_FILE")
         app.state.mode = "injected" if events else "replay" if replay else "live"
         app.state.orchestrator = orchestrator or Orchestrator()
-        stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "0"))) if replay
+        stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "30"))) if replay
                             else live_events())
         task = asyncio.create_task(app.state.orchestrator.run(stream))
         task.add_done_callback(_log_failure)

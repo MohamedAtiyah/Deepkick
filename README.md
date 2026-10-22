@@ -201,13 +201,15 @@ The 429 backoff itself (schedule, Retry-After, and not using up the normal attem
 | `WS /ws?persona=&club=&player=&lang=` | first every overlay already released for that viewer (so a late viewer isn't blank), then each new overlay as it's released |
 | `GET /healthz` | the run status (`not_started`, `running`, `finished`, `failed`), where each stage gets its input (`replay` or `live`; `foundry` or `templates`), and the run counters |
 
-- **Startup:** the app starts the orchestrator in the background. It uses replay mode when `REPLAY_FILE` is set (paced by `REPLAY_SPEED`, default 0, meaning as fast as possible) and live Event Hubs mode otherwise. It reads `.env` first.
+- **Startup:** the app starts the orchestrator in the background. It uses replay mode when `REPLAY_FILE` is set and live Event Hubs mode otherwise. It reads `.env` first.
+  - **Pacing:** replay ingest is paced against the match clock at `REPLAY_SPEED` times real time, default 30, so a 90-minute match takes about 3 minutes. `/state` therefore follows the stream's current position instead of jumping to full time while the overlays are still in the first half. Overlays still trail `/state` by the model latency, about 6–20 s per moment.
+  - **Unpaced:** `REPLAY_SPEED=0` turns pacing off, which is what the tests use.
 - **Many viewers, one run:** each WebSocket client has its own profile. On every release the orchestrator hands the moment and its three cached persona versions to each connected client, and `select_overlay` renders that client's persona, favourite-club boost and language. So any number of viewers share one model call per moment.
 - **Bad parameters:** an unknown `persona` or `lang` on `/ws` closes the socket (code 1008). On `/recap` it returns 422.
 
 ```bash
 # Demo with no Azure at all: replay seed 42 at 30x real time (90 minutes in 3)
-REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl REPLAY_SPEED=30 .venv/bin/uvicorn deepkick.api:app --reload
+REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl .venv/bin/uvicorn deepkick.api:app --reload
 
 # Then, in another terminal
 curl localhost:8000/state
@@ -244,7 +246,9 @@ curl localhost:8000/healthz
   - **Fallback flag:** each version carries its own `fallback` flag, and the agent never raises.
 - **Templates:** they're built from the moment facts alone, never from the narrative text, which may be model-written.
   - **Casual:** each moment type names its key fact in plain words. A goal names the scorer and the score ("Rafe Ironsby scores, Calderbrook lead 1-0"), and a speed milestone gives the speed ("fires a shot at 129.6 km/h"). There is no content-free filler.
-  - **Analyst and player:** these use the Narrative Agent's facts-only template text. The analyst detail lists the key numbers in plain words, with the score (both sides) and the player's goal tally first. Fact keys the template has no wording for are left out rather than printed raw.
+  - **Analyst:** a precise headline with the moment's key number ("Rafe Ironsby scores: 0.252 xG from 9.2 m"). Its detail lists the key numbers in plain words, with the score (both sides) and the player's goal tally first, and fact keys without wording are left out rather than printed raw. Its why is the Narrative Agent's facts-only template line.
+  - **Player:** built around the player's name, or the club's for half-time, full-time and momentum swings ("Rafe Ironsby's first goal of the match"), with its own player-centred detail and why.
+  - **No repeats:** for every moment type the three headlines differ, and no persona's detail or why repeats another's, so switching persona always changes what's on screen.
 - **Viewer selection (plain Python, no model):** `select_overlay(moment, versions, profile)` picks the profile's persona and returns an overlay that follows the Overlay contract. It is checked by `validate_overlay` in [`deepkick/contracts.py`](deepkick/contracts.py), which checks fields, types, `persona` and `lang`.
   - **Priority:** 1–5 by moment type (goal 5, full-time 4, big chance, momentum swing, pressure spell and half-time 3, high press win and speed, sprint or pass milestones 2, distance milestones 1). It goes up by 1 when the moment involves the viewer's favourite club or player, capped at 5; a half-time or full-time moment involves both clubs.
   - **Other club:** a moment of priority 2 or lower for the viewer's other club is shown as priority 1. Goals keep priority 5 for every profile and are never dropped.

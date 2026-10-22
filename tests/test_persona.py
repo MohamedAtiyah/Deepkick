@@ -321,3 +321,24 @@ def test_cli_prints_valid_overlays_without_calling_a_model(monkeypatch, capsys):
 def test_persona_prompt_says_shot_speed_and_distance_are_not_a_run():
     assert "a shot distance (shot_distance_m) is the distance from goal" in SYSTEM_PROMPT
     assert "Never describe either as a player running" in SYSTEM_PROMPT
+
+
+def test_each_persona_has_its_own_headline_detail_and_why(narrated):
+    moments = {m["type"]: m for m, _ in narrated}
+    moments["pass_milestone"] = moments["speed_milestone"] | {
+        "type": "pass_milestone", "moment_id": "pass-50",
+        "facts": {"passes": 50, "passes_completed": 42, "pass_accuracy_pct": 84.0}}
+    assert set(moments) == set(PRIORITY)
+    for kind, moment in moments.items():
+        versions = template_versions(moment)
+        headlines = [versions[p]["headline"] for p in PERSONAS]
+        assert len(set(headlines)) == 3, (kind, headlines)
+        lines = [versions[p][k] for p in PERSONAS for k in ("detail", "why")]
+        assert len(set(lines)) == 6, (kind, lines)
+        assert any(c.isdigit() for c in versions["analyst"]["headline"]), kind  # the analyst gets a key number
+        name = moment["player"]["name"] if moment["player"] else None
+        assert not name or versions["player"]["headline"].startswith(name), kind
+        for persona in PERSONAS:
+            assert len(versions[persona]["headline"].split()) <= 10, (kind, persona)
+            for key in ("detail", "why"):
+                assert len(versions[persona][key].split()) <= 30, (kind, persona, key)
