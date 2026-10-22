@@ -175,7 +175,7 @@ Overlays print to stdout as JSON lines.
 - **Explain and Personalise:** the Microsoft Foundry model deployment (`FOUNDRY_*`).
 - **Orchestration:** Microsoft Agent Framework, which runs in process.
 
-**Next:** the overlay API in section 5 serves this shared state. The React broadcast view, which will draw each overlay at its `show_at_ms` for its `duration_ms`, comes after that.
+The overlay API in section 5 serves this shared state, and the broadcast view in section 6 draws it.
 
 **Tests:** [`tests/test_orchestrator.py`](tests/test_orchestrator.py) uses the seed-42 replay and a fake model client with controllable delays, and needs no network. It covers:
 - overlays in match-clock order when work finishes out of order;
@@ -230,7 +230,31 @@ curl localhost:8000/healthz
 - every overlay validating against the Overlay contract;
 - the default app replaying `REPLAY_FILE` with no Azure settings.
 
-## 6. Personalise: Persona Agent
+## 6. Broadcast view
+
+[`web/`](web) is a small React app built with Vite that draws the broadcast from the overlay API. It has five components, no state library and no UI framework, and all its CSS lives in the project. Club names, colours and squads come from the API and [`data/league.json`](data/league.json); there are no logos or real branding.
+
+- **Match frame:** a video-less pitch with the scoreboard: clubs in their fictional colours, score, match clock and period, polled from `/state` every second.
+- **Overlays:** overlays from `/ws` appear as lower thirds showing their headline, detail and why. Each stays for its own `duration_ms` and never appears before the match clock reaches its `show_at_ms`.
+  - **Two at once:** at most two are on screen; the rest queue in clock order.
+  - **Late viewers:** the queue keeps only the newest 4, so a late viewer's backlog doesn't play for minutes. The full history is in the recap.
+- **Personalisation panel:** persona (analyst, casual fan, player focus), favourite club, favourite player (the squads from `data/league.json`) and language.
+  - **Language:** only English is enabled for now. Spanish and Arabic are listed but greyed out, and the overlay area already switches to right-to-left for Arabic.
+  - **Instant switching:** any change reconnects `/ws` with the new parameters. Overlays are keyed by moment, so the new socket's backlog swaps the on-screen text in place instead of queuing the moments again.
+- **Recap:** `/recap` for the current persona, newest first, refreshed every 5 seconds.
+- **Connection state:** shown as Live, Connecting or Reconnecting. `/ws` reconnects on its own after 1 s, 2 s, 4 s, then every 8 s.
+
+```bash
+# Terminal 1: the API, replaying seed 42 at 30x (no Azure needed)
+REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl .venv/bin/uvicorn deepkick.api:app --port 8000
+
+# Terminal 2: the broadcast view on http://localhost:5173
+cd web && npm install && npm run dev
+```
+
+In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/recap`, `/healthz` and `/ws` to `localhost:8000`. `npm run build` writes a static site to `web/dist/` for Azure Static Web Apps.
+
+## 7. Personalise: Persona Agent
 
 [`deepkick/agents/persona.py`](deepkick/agents/persona.py) takes the Narrative Agent's output for a moment (headline, `why_it_matters`, theme, evidence) and the moment's facts. It rewrites them for three viewers, then turns the right version into an overlay for each viewer profile.
 

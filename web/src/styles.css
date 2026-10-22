@@ -1,0 +1,156 @@
+:root {
+  --bg: #0a1020;
+  --panel: #121a2e;
+  --line: #24304d;
+  --text: #eef2fb;
+  --muted: #9aa6c2;
+  --accent: #36c2ff;
+  --gold: #f5c542;
+  color-scheme: dark;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+
+.app {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  height: 100vh; /* the frame and its overlays always fit the screen; the recap scrolls instead */
+  padding: 16px;
+}
+@media (max-width: 1000px) { .app { grid-template-columns: 1fr; height: auto; } .frame { min-height: 560px; } }
+
+/* Match frame: no video, just a pitch with the scoreboard and lower-third overlays. */
+.frame {
+  position: relative;
+  min-height: 0;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: #0f3a24;
+}
+.pitch {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(transparent 49.7%, rgba(255, 255, 255, 0.35) 49.7% 50.3%, transparent 50.3%),
+    radial-gradient(circle at 50% 50%, transparent 74px, rgba(255, 255, 255, 0.35) 75px 77px, transparent 78px),
+    repeating-linear-gradient(90deg, #12462b 0 10%, #0f3d25 10% 20%);
+}
+
+.connection {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  background: var(--panel);
+}
+.connection::before { content: "●"; margin-right: 6px; }
+.connection.live::before { color: #3ddc84; }
+.connection.connecting::before, .connection.reconnecting::before { color: var(--gold); }
+
+.scoreboard {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 2;
+  display: flex;
+  align-items: stretch;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(8, 12, 24, 0.92);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+  font-weight: 700;
+}
+.scoreboard.waiting { padding: 10px 14px; color: var(--muted); font-weight: 500; }
+.club { display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+.badge {
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  background: var(--primary, #444);
+  color: var(--secondary, #fff);
+}
+.name { font-size: 15px; white-space: nowrap; }
+.score { display: flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 26px; background: #1c2742; }
+.score span { color: var(--muted); }
+.clock {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 14px;
+  background: var(--accent);
+  color: #04121d;
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+}
+.clock small { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+
+.overlays {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.overlay {
+  max-width: 720px;
+  padding: 12px 16px;
+  border-left: 6px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(8, 12, 24, 0.93);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  animation: slide-in 0.35s ease-out;
+}
+.overlay.goal, .overlay.p5 { border-left-color: var(--gold); }
+.overlay header { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+.overlay .tag { color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
+.overlay.goal .tag { color: var(--gold); }
+.overlay h2 { margin: 4px 0 6px; font-size: 24px; line-height: 1.2; }
+.overlay p { margin: 0; font-size: 16px; line-height: 1.4; }
+.overlay .why { margin-top: 4px; color: var(--muted); }
+@keyframes slide-in { from { opacity: 0; transform: translateY(12px); } }
+
+/* Side column: personalisation and recap. */
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
+.panel, .recap { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
+h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+.personas { display: flex; gap: 6px; margin-bottom: 12px; }
+.personas button {
+  flex: 1;
+  padding: 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.personas button.on { background: var(--accent); border-color: var(--accent); color: #04121d; font-weight: 700; }
+.panel label { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 13px; color: var(--muted); }
+.panel select {
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+button:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.recap { flex: 1; min-height: 120px; overflow: auto; }
+.recap ol { margin: 0; padding: 0; list-style: none; }
+.recap li { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.recap li.goal strong { color: var(--gold); }
+.recap .minute { min-width: 44px; color: var(--accent); font-variant-numeric: tabular-nums; font-size: 13px; }
+.recap strong { font-size: 14px; }
+.recap p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
+.recap .empty { color: var(--muted); font-size: 14px; }
