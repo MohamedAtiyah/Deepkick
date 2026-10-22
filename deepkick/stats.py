@@ -77,6 +77,17 @@ def _avg(total: float, count: int, digits: int) -> float:
     return round(total / count, digits) if count else 0.0
 
 
+def _ball_after(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Where the ball is after an event and who has it, in the acting team's frame (attacking towards x=105)."""
+    kind, payload = event["event_type"], event["payload"]
+    if kind == "player_run" and not payload["with_ball"]:
+        return None  # an off-ball run or a 5-minute tracking summary does not move the ball
+    received = kind == "pass" and payload["completed"]
+    xy = payload["end"] if received or kind == "player_run" else event["coordinates"]
+    holder = payload["recipient"]["id"] if received else event["player"]["id"]
+    return {"team": event["team"], "player_id": holder, "x": xy["x"], "y": xy["y"]}
+
+
 def _enters_final_third(event: dict[str, Any]) -> bool:
     """True for a completed pass or a carry that starts before the final third and ends inside it."""
     kind, payload = event["event_type"], event["payload"]
@@ -100,6 +111,7 @@ class StatsAgent:
         self._clock = 0
         self._possession: str | None = None
         self._pressure = 0.0
+        self._ball: dict[str, Any] | None = None
         # (clock, team, "shots" | "xg" | "final_third_entries" | "possession", amount) inside the momentum window
         self._recent: deque[tuple[int, str, str, float]] = deque()
 
@@ -159,6 +171,7 @@ class StatsAgent:
                     self._team(payload[side]["id"]).name = payload[side]["name"]
             return
 
+        self._ball = _ball_after(event) or self._ball
         ref = event["player"]
         player = self.players.setdefault(ref["id"], PlayerStats(ref["name"], ref["position"], event["team"]))
         player.actions += 1
@@ -250,6 +263,7 @@ class StatsAgent:
             "score": dict(self.score),
             "possession_team": self._possession,
             "pressure_index": self._pressure,
+            "ball": self._ball,
             "momentum_window_minutes": MOMENTUM_WINDOW_S // 60,
             "last_event_id": self.last_event_id,
             "events_processed": len(self._seen),

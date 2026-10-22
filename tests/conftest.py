@@ -1,6 +1,7 @@
 """Shared pytest fixtures and helpers: the fixed-seed replay file, its moments and a fake Foundry chat client."""
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +10,16 @@ import openai
 import pytest
 
 REPLAY_PATH = Path(__file__).parent / "fixtures" / "replay_ASH-CAL-42.jsonl"
+
+
+@pytest.fixture(autouse=True)
+def no_real_azure(monkeypatch):
+    """Tests never read the developer's .env or reach Azure: dotenv does nothing and every Azure setting is unset."""
+    import dotenv
+
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: False)
+    for key in [k for k in os.environ if k.startswith(("FOUNDRY_", "AZURE_TRANSLATOR_", "EVENTHUB_"))]:
+        monkeypatch.delenv(key)
 
 
 @pytest.fixture(scope="session")

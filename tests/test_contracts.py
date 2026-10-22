@@ -65,6 +65,7 @@ def _overlay():
     lambda o: None,
     lambda o: o["payload"].update(player=None),  # match-wide moments have no player
     lambda o: o.update(persona="casual", lang="ar", priority=1),
+    lambda o: o.update(lang="en"),
 ])
 def test_valid_overlays_pass(mutate):
     overlay = _overlay()
@@ -84,6 +85,8 @@ def test_valid_overlays_pass(mutate):
     (lambda o: o.update(priority=True), "priority"),
     (lambda o: o.update(persona="coach"), "persona"),
     (lambda o: o.update(lang="fr"), "lang"),
+    (lambda o: o.update(lang="es"), "lang"),
+    (lambda o: o.update(lang="EN"), "lang"),
     (lambda o: o["payload"].pop("why"), "payload"),
     (lambda o: o["payload"].update(player=""), "payload.player"),
     (lambda o: o["payload"].update(headline=" "), "payload.headline"),

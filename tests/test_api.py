@@ -154,3 +154,28 @@ def test_default_app_paces_the_replay_so_state_tracks_the_stream(monkeypatch):
         state, health = client.get("/state").json(), client.get("/healthz").json()
     assert health["status"] == "running"
     assert state["status"] == "kickoff" and "00:20" <= state["match_clock"] <= "01:00"  # not 90:00 and full time
+
+
+def test_arabic_overlays_over_ws_and_recap_with_a_mocked_translator():
+    from tests.test_translate import ARABIC, fake_translator
+
+    translator, requests = fake_translator()
+    client = _failing_client()
+    orchestrator = Orchestrator(NarrativeAgent(client, "m"), PersonaAgent(client, "m"), translator=translator)
+    with TestClient(create_app(orchestrator, replay_events(REPLAY_PATH))) as api:
+        _wait_until(lambda: api.get("/healthz").json()["status"] == "finished")
+        with api.websocket_connect("/ws?persona=casual&lang=ar") as arabic, \
+                api.websocket_connect("/ws?persona=casual&lang=en") as english:
+            ar = [arabic.receive_json() for _ in range(TOTAL)]
+            en = [english.receive_json() for _ in range(TOTAL)]
+        recap = api.get("/recap", params={"persona": "casual", "lang": "ar"}).json()
+        assert api.get("/recap", params={"lang": "es"}).status_code == 422
+        with pytest.raises(WebSocketDisconnect):
+            with api.websocket_connect("/ws?lang=es") as ws:
+                ws.receive_json()
+    for a, e in zip(ar, en):
+        validate_overlay(a)
+        assert a["lang"] == "ar" and a["payload"]["headline"] == ARABIC + e["payload"]["headline"]
+        assert a["payload"]["player"] == e["payload"]["player"]  # names stay as they are
+    assert recap[0] == ar[-1]
+    assert len(requests) <= TOTAL  # at most one batched call per moment, fewer once strings repeat

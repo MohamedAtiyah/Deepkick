@@ -195,3 +195,21 @@ def test_top_run_speed_per_team_and_player(replay, final):
         speeds = [e["payload"]["speed_kmh"] for e in replay
                   if e["event_type"] == "player_run" and e["player"]["id"] == pid]
         assert player["top_run_speed_kmh"] == max(speeds, default=0.0)
+
+
+def test_snapshot_shows_where_the_ball_is_and_who_has_it(replay):
+    agent = StatsAgent()
+    assert agent.snapshot()["ball"] is None
+    for event in replay[:300]:
+        agent.update(event)
+        kind, payload, ball = event["event_type"], event["payload"], agent.snapshot()["ball"]
+        if kind == "pass" and payload["completed"]:
+            assert ball == {"team": event["team"], "player_id": payload["recipient"]["id"], **payload["end"]}
+        elif kind == "player_run" and payload["with_ball"]:
+            assert ball == {"team": event["team"], "player_id": event["player"]["id"], **payload["end"]}
+        elif kind in ("shot", "tackle", "pressure_event", "possession_change"):
+            assert ball == {"team": event["team"], "player_id": event["player"]["id"], **event["coordinates"]}
+    before = agent.snapshot()["ball"]
+    tracking = next(e for e in replay[300:] if e["event_type"] == "player_run" and not e["payload"]["with_ball"])
+    agent.update(tracking)
+    assert agent.snapshot()["ball"] == before  # off-ball runs and tracking summaries do not move the ball

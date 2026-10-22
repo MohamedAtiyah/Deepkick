@@ -18,7 +18,7 @@ cp .env.example .env   # then fill in the values
 .venv/bin/python -m pytest
 ```
 
-GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs the same tests on Python 3.11 for every push and pull request.
+GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) runs the same tests on Python 3.11 for every push and pull request. Tests never read your `.env` or reach Azure: [`tests/conftest.py`](tests/conftest.py) turns dotenv off and clears every Azure setting for each test.
 
 ## 1. Ingest: match simulator
 
@@ -66,6 +66,7 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 - **Player stats:** actions, passes, shots, goals, xG, top shot speed, top run speed, tackles, pressures and distance covered.
 - **Momentum:** each team's shots, xG, possession share and final-third entries (completed passes or carries from before x = 70 m to beyond it) over the last 5 minutes of match clock, plus a momentum `value`: the team's share (0–100) of `2 × shots + 10 × xG + final-third entries + 5 × possession share`. The two teams' values add up to 100.
 - **Live context:** the current `pressure_index` (pressure on the team in possession, 0–1) and `possession_team`.
+- **Ball:** `ball` gives where the ball is after the latest event and who has it: `{team, player_id, x, y}` in that team's attacking frame. It follows the receiver of a completed pass and the carrier of a run; off-ball runs and the 5-minute tracking summaries don't move it. The broadcast view uses it to draw the players; the model never sees it.
 - **Failure recovery:** events are validated against the contract. A malformed event is skipped, and a redelivered event (Event Hubs delivers at least once) is ignored by `event_id`. Neither changes the state, and both are logged with `fallback=yes`.
 - **Logging:** each handoff logs `stage=stats event_id=… duration_ms=… fallback=yes|no`.
 
@@ -175,7 +176,7 @@ Overlays print to stdout as JSON lines.
 - **Explain and Personalise:** the Microsoft Foundry model deployment (`FOUNDRY_*`).
 - **Orchestration:** Microsoft Agent Framework, which runs in process.
 
-**Next:** the overlay API in section 5 serves this shared state. The React broadcast view, which will draw each overlay at its `show_at_ms` for its `duration_ms`, comes after that.
+The overlay API in section 5 serves this shared state, and the broadcast view in section 6 draws it.
 
 **Tests:** [`tests/test_orchestrator.py`](tests/test_orchestrator.py) uses the seed-42 replay and a fake model client with controllable delays, and needs no network. It covers:
 - overlays in match-clock order when work finishes out of order;
@@ -196,8 +197,8 @@ The 429 backoff itself (schedule, Retry-After, and not using up the normal attem
 
 | Endpoint | What it returns |
 |---|---|
-| `GET /state` | the current match snapshot: score, clock, status, team stats with momentum, player stats |
-| `GET /recap?persona=&limit=` | overlays released so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona), at most `limit` |
+| `GET /state` | the current match snapshot: score, clock, status, ball position, team stats with momentum, player stats |
+| `GET /recap?persona=&lang=&limit=` | overlays released so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona) in `en` or `ar` (default `en`), at most `limit` |
 | `WS /ws?persona=&club=&player=&lang=` | first every overlay already released for that viewer (so a late viewer isn't blank), then each new overlay as it's released |
 | `GET /healthz` | the run status (`not_started`, `running`, `finished`, `failed`), where each stage gets its input (`replay` or `live`; `foundry` or `templates`), and the run counters |
 
@@ -230,7 +231,41 @@ curl localhost:8000/healthz
 - every overlay validating against the Overlay contract;
 - the default app replaying `REPLAY_FILE` with no Azure settings.
 
-## 6. Personalise: Persona Agent
+## 6. Broadcast view
+
+[`web/`](web) is a small React app built with Vite that draws the broadcast from the overlay API. It has five components, no state library and no UI framework, and all its CSS lives in the project. Club names, colours and squads come from the API and [`data/league.json`](data/league.json); there are no logos or real branding.
+
+- **Match frame:** a video-less pitch with the scoreboard: clubs in their fictional colours, score, match clock and period, polled from `/state` every second.
+  - **Clock:** ticks smoothly between polls, at the rate the last two polls showed. A 30x replay counts up visibly instead of jumping 30 seconds at a time, and the clock stops at half-time and full-time.
+  - **Pitch:** drawn to real proportions on the data's 105 × 68 metre system, as an SVG whose units are metres. It has goals 7.32 m wide outside each goal line, 40.3 × 16.5 m penalty areas, 18.3 × 5.5 m six-yard boxes, penalty spots 11 m out, D arcs and the centre circle at 9.15 m, 1 m corner arcs, the halfway line and the centre spot. The stripes are mown. The pitch keeps its landscape aspect ratio at any container width.
+  - **Players:** all 22 starters, in club colours with shirt numbers. Markers are placed by converting metres to percentages of the same box, with the home side attacking to the right. The layout rules live in [`web/src/pitchLayout.js`](web/src/pitchLayout.js):
+    - Everyone sits on their formation slot from `data/league.json`, and the player on the ball is drawn at the event's coordinates. The events only carry coordinates for the player involved.
+    - Both teams share one small shift toward the ball, capped at 6 m along the pitch and 3 m across, so the shape slides as a unit. Defenders move half of it, midfielders three quarters and forwards all of it; keepers stay on their line, moving at most 2 m.
+    - Markers that land within 3 m of each other are nudged apart, but the player on the ball never moves.
+  - **Movement:** players ease to their spots over 400 ms and the ball glides over 600 ms, so nothing teleports.
+- **Overlays:** overlays from `/ws` appear as lower thirds showing their headline, detail and why. Each stays for its own `duration_ms` and never appears before the match clock reaches its `show_at_ms`.
+  - **Two at once:** at most two are on screen; the rest queue in clock order.
+  - **Late viewers:** the queue keeps only the newest 4, so a late viewer's backlog doesn't play for minutes. The full history is in the recap.
+- **Personalisation panel:** persona (analyst, casual fan, player focus), favourite club, favourite player (the squads from `data/league.json`) and language.
+  - **Language:** English or Arabic. With Arabic, the overlay and recap text switch to right-to-left, right-aligned, with a font stack that shapes Arabic well. Scores are isolated left-to-right, because after an Arabic word the browser would otherwise show "1-0" as "0-1". The scoreboard, pitch and controls stay left-to-right.
+  - **Instant switching:** any change reconnects `/ws` with the new parameters. Overlays are keyed by moment, so the new socket's backlog swaps the on-screen text in place instead of queuing the moments again.
+- **Recap:** `/recap` for the current persona, newest first, refreshed every 5 seconds.
+- **Connection state:** shown as Live, Connecting or Reconnecting. `/ws` reconnects on its own after 1 s, 2 s, 4 s, then every 8 s.
+
+```bash
+# Terminal 1: the API, replaying seed 42 at 30x (no Azure needed)
+REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl .venv/bin/uvicorn deepkick.api:app --port 8000
+
+# Terminal 2: the broadcast view on http://localhost:5173
+cd web && npm install && npm run dev
+
+# The pitch layout rules have tests (Node's built-in runner, no extra dependency)
+cd web && npm test
+```
+
+In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/recap`, `/healthz` and `/ws` to `localhost:8000`. `npm run build` writes a static site to `web/dist/` for Azure Static Web Apps.
+
+## 7. Personalise: Persona Agent
 
 [`deepkick/agents/persona.py`](deepkick/agents/persona.py) takes the Narrative Agent's output for a moment (headline, `why_it_matters`, theme, evidence) and the moment's facts. It rewrites them for three viewers, then turns the right version into an overlay for each viewer profile.
 
@@ -258,7 +293,15 @@ curl localhost:8000/healthz
   - **Priority:** 1–5 by moment type (goal 5, full-time 4, big chance, momentum swing, pressure spell and half-time 3, high press win and speed, sprint or pass milestones 2, distance milestones 1). It goes up by 1 when the moment involves the viewer's favourite club or player, capped at 5; a half-time or full-time moment involves both clubs.
   - **Other club:** a moment of priority 2 or lower for the viewer's other club is shown as priority 1. Goals keep priority 5 for every profile and are never dropped.
   - **Timing:** `show_at_ms` comes from the match clock, and `duration_ms` is 8000 for goals and 6000 for everything else.
-  - **Language:** `lang` stays `en` until the translation stage.
+  - **Language:** `lang` is `en` or `ar`, and the contract rejects anything else. For `ar`, the overlay uses the Arabic version made by the translate step below, or the English text if there isn't one.
+- **Translate step ([`deepkick/agents/translate.py`](deepkick/agents/translate.py)):** in the orchestrator's Personalise step, each moment's three persona versions are translated into Arabic with Azure AI Translator. This happens once, in a worker thread, so no viewer waits and switching language is instant.
+  - **Names and numbers are protected:** the text is sent as HTML with every fictional player and club name (and club code) wrapped in `<span class="notranslate">`, so a name stays in Latin script and reads the same in every overlay instead of being transliterated differently each time.
+    - Every number is wrapped too. Left alone, the live Translator wrote small counts as Arabic words ("1 shot" became "تسديدة واحدة"), which lost the digit; on seed 42 that sent most persona versions back to English, and with numbers protected none fell back.
+    - Any Arabic-Indic digits that come back are turned into Western digits, and a space the Translator drops beside a protected name is put back.
+  - **Numbers are checked:** every number in the English text must still be in the translation, none lost or altered. If one is, that persona's version keeps its English text. This is the same guarantee as the narrative's number check.
+  - **One call per moment:** all of a moment's strings go to the Translator in a single call, and results are cached by (text, language), so strings that recur across personas and moments are never sent twice.
+  - **Failure rules as elsewhere:** a 10-second timeout and one retry. A 429 waits 2 s, 4 s, then 8 s (or Retry-After, capped at 30 s) without using up an attempt, like a model 429. After a timeout, an HTTP error or a malformed reply, every version keeps its English text with `fallback: true`, so an overlay always ships. Each handoff logs `stage=translate event_id=… duration_ms=… fallback=yes|no`.
+  - **English:** passes through with no call.
 - **Logging:** each handoff logs `stage=persona event_id=… duration_ms=… fallback=yes|no sources=analyst:model|template,casual:…,player:… cached=yes|no`. Each templated version (`persona=… fallback=yes: <reason>`) and each failed attempt is logged with its reason.
 
 ```bash
@@ -266,6 +309,14 @@ curl localhost:8000/healthz
 .venv/bin/python -m deepkick.agents.persona tests/fixtures/replay_ASH-CAL-42.jsonl --persona analyst --club ASH --player ASH08 --limit 8
 ```
 
-**Azure service:** the same Microsoft Foundry model deployment as the Narrative Agent (`FOUNDRY_*` in `.env`). The CLI calls the model twice per new moment: once for the narrative and once for the three persona versions. Without `FOUNDRY_*`, both stages use their templates.
+**Azure services:** the same Microsoft Foundry model deployment as the Narrative Agent (`FOUNDRY_*` in `.env`), and Azure AI Translator for Arabic (`AZURE_TRANSLATOR_KEY`, `AZURE_TRANSLATOR_REGION` and `AZURE_TRANSLATOR_ENDPOINT` in `.env`; the endpoint can be the global one or the resource's own). The CLI calls the model twice per new moment: once for the narrative and once for the three persona versions. Without `FOUNDRY_*`, both stages use their templates. Without the Translator settings, Arabic overlays show the English text.
 
-**Tests:** [`tests/test_persona.py`](tests/test_persona.py) uses a fake model client and the seed-42 replay. It covers three personas from one cached call, the favourite club and player boost and its cap, goals never dropped for any profile, timeout fallback, invented numbers and broken versions being rejected, one failed version templated alone, a templated version never mixing in model text, every casual template naming its key fact without filler, a retry when every version fails or the reply is broken, plain-word key facts with the full score, the prompt rules, templates passing the same checks for every moment, overlay timing, and the CLI. [`tests/test_contracts.py`](tests/test_contracts.py) covers valid and invalid overlays.
+**Tests:** [`tests/test_persona.py`](tests/test_persona.py) uses a fake model client and the seed-42 replay. It covers three personas from one cached call, the favourite club and player boost and its cap, goals never dropped for any profile, timeout fallback, invented numbers and broken versions being rejected, one failed version templated alone, a templated version never mixing in model text, every casual template naming its key fact without filler, a retry when every version fails or the reply is broken, plain-word key facts with the full score, the prompt rules, templates passing the same checks for every moment, overlay timing, and the CLI. [`tests/test_contracts.py`](tests/test_contracts.py) covers valid and invalid overlays, including `lang` being only `en` or `ar`. [`tests/test_translate.py`](tests/test_translate.py) uses a mocked Translator. It covers:
+- Arabic returned in one batched call with names kept in Latin script;
+- English passing through with no call;
+- the cache preventing repeat calls;
+- a dropped number falling back to English for that version;
+- Arabic-Indic digits coming back as Western digits;
+- timeouts and malformed replies falling back to English with the flag set.
+
+[`tests/test_api.py`](tests/test_api.py) checks Arabic overlays over `/ws?lang=ar` and `/recap?lang=ar`.
