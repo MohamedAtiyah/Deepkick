@@ -187,7 +187,8 @@ class RateLimitedClient:
                      "evidence": [{"stat": stat, "value": value}]}
         else:  # the persona call
             who = moment["player"]["name"] if moment["player"] else moment["team"] or "The match"
-            reply = {p: {"headline": f"Model: {who}", "detail": "Model detail.", "why": "Model why."}
+            reply = {p: {"headline": f"Model: {who}", "detail": "The model wrote this detail.",
+                         "why": "The model wrote this line."}
                      for p in ("analyst", "casual", "player")}
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(reply)))])
 
