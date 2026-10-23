@@ -5,9 +5,9 @@ import { clockMs, splitScores } from "./live.js";
 export const Text = ({ children }) =>
   splitScores(children).map(([part, isScore], i) => (isScore ? <bdi key={i} dir="ltr">{part}</bdi> : part));
 
-const SLOTS = 2; // never more than two overlays on screen
+const SLOTS = 1; // one lower-third at a time: the highest priority of those due; the rest wait
 const QUEUE = 4; // shortcut: a late viewer's backlog is trimmed to the newest few rather than replayed for minutes
-const LABEL = { goal: "Goal", big_chance: "Big chance", half_time: "Half-time", full_time: "Full-time",
+export const LABEL = { goal: "Goal", big_chance: "Big chance", half_time: "Half-time", full_time: "Full-time",
   momentum_swing: "Momentum", pressure_spell: "Pressure", high_press_win: "High press", speed_milestone: "Shot speed",
   sprint_milestone: "Sprint", distance_milestone: "Distance", pass_milestone: "Passing" };
 
@@ -33,7 +33,8 @@ export default function OverlayStack({ overlays, matchClock, lang }) {
       const nowMs = clockMs(matchClock);
       setView((prev) => {
         const live = prev.onScreen.filter((item) => item.until > now);
-        const ready = prev.queue.filter((key) => overlays.get(key).show_at_ms <= nowMs).slice(0, SLOTS - live.length);
+        const ready = prev.queue.filter((key) => overlays.get(key).show_at_ms <= nowMs)
+          .sort((a, b) => overlays.get(b).priority - overlays.get(a).priority).slice(0, SLOTS - live.length);
         if (!ready.length && live.length === prev.onScreen.length) return prev;
         ready.forEach((key) => handled.current.add(key));
         return {
@@ -46,18 +47,21 @@ export default function OverlayStack({ overlays, matchClock, lang }) {
   }, [overlays, matchClock]);
 
   return (
-    <div className="overlays" lang={lang} dir={lang === "ar" ? "rtl" : "ltr"} aria-live="polite">
+    // Not a live region: the feed announces each moment once, so the lower-third would only repeat it.
+    <div className="lower-third">
       {view.onScreen.map(({ key }) => {
         const overlay = overlays.get(key);
         return (
           <article key={key} className={`overlay ${overlay.type} p${overlay.priority}`}>
             <header>
-              <span className="tag">{LABEL[overlay.type] ?? overlay.type}</span>
+              <span className={`chip ${overlay.type}`}>{LABEL[overlay.type] ?? overlay.type}</span>
               <span className="minute">{overlay.match_clock}</span>
             </header>
-            <h2><Text>{overlay.payload.headline}</Text></h2>
-            <p><Text>{overlay.payload.detail}</Text></p>
-            <p className="why"><Text>{overlay.payload.why}</Text></p>
+            <div lang={lang} dir={lang === "ar" ? "rtl" : "ltr"}>
+              <h2><Text>{overlay.payload.headline}</Text></h2>
+              <p><Text>{overlay.payload.detail}</Text></p>
+              <p className="why"><Text>{overlay.payload.why}</Text></p>
+            </div>
           </article>
         );
       })}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Text } from "./OverlayStack.jsx";
 
+/** The /recap list for the current persona and language, refreshed every 5 seconds. */
 export default function Recap({ persona, lang }) {
   const [items, setItems] = useState([]);
   useEffect(() => {
@@ -20,13 +21,12 @@ export default function Recap({ persona, lang }) {
 
   return (
     <section className="recap">
-      <h3>Recap</h3>
       {!items.length && <p className="empty">Nothing yet.</p>}
-      <ol lang={lang} dir={lang === "ar" ? "rtl" : "ltr"}>
+      <ol>
         {items.map((o) => (
           <li key={o.overlay_id} className={o.type}>
             <span className="minute">{o.match_clock}</span>
-            <div>
+            <div lang={lang} dir={lang === "ar" ? "rtl" : "ltr"}>
               <strong><Text>{o.payload.headline}</Text></strong>
               <p><Text>{o.payload.detail}</Text></p>
             </div>

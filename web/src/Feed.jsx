@@ -1,0 +1,38 @@
+import { clockMs } from "./live.js";
+import { LABEL, Text } from "./OverlayStack.jsx";
+
+/** Every overlay whose moment has come, newest first: full cards, or one line each when `compact`. */
+export default function Feed({ overlays, matchClock, lang, compact = false }) {
+  const now = clockMs(matchClock);
+  const items = [...overlays].filter(([, o]) => o.show_at_ms <= now).sort(([, a], [, b]) => b.show_at_ms - a.show_at_ms);
+  const dir = lang === "ar" ? "rtl" : "ltr";
+  const chip = (o) => <span className={`chip ${o.type}`}>{LABEL[o.type] ?? o.type}</span>;
+
+  return (
+    <div className={compact ? "feed compact" : "feed"} aria-live={compact ? undefined : "polite"}>
+      {!items.length && <p className="empty">Moments appear here as the match unfolds.</p>}
+      {compact ? (
+        <ol className="timeline">
+          {items.map(([key, o]) => (
+            <li key={key}>
+              <span className="minute">{o.match_clock}</span>
+              {chip(o)}
+              <span lang={lang} dir={dir}><Text>{o.payload.headline}</Text></span>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        items.map(([key, o]) => (
+          <article key={key} className={`card ${o.type}`}>
+            <header>{chip(o)}<span className="minute">{o.match_clock}</span></header>
+            <div lang={lang} dir={dir}>
+              <h3><Text>{o.payload.headline}</Text></h3>
+              <p><Text>{o.payload.detail}</Text></p>
+              <p className="why"><Text>{o.payload.why}</Text></p>
+            </div>
+          </article>
+        ))
+      )}
+    </div>
+  );
+}

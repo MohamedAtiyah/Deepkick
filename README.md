@@ -233,24 +233,29 @@ curl localhost:8000/healthz
 
 ## 6. Broadcast view
 
-[`web/`](web) is a small React app built with Vite that draws the broadcast from the overlay API. It has five components, no state library and no UI framework, and all its CSS lives in the project. Club names, colours and squads come from the API and [`data/league.json`](data/league.json); there are no logos or real branding.
+[`web/`](web) is a React match centre built with Vite that draws the broadcast from the overlay API. It has no state library, no UI framework and no UI dependencies beyond React; all its CSS lives in the project. Club names, colours and squads come from the API and [`data/league.json`](data/league.json); there are no logos or real branding.
 
-- **Match frame:** a video-less pitch with the scoreboard: clubs in their fictional colours, score, match clock and period, polled from `/state` every second.
+| Desktop, light | Desktop, dark | Mobile, dark |
+|---|---|---|
+| ![Match centre, light theme](docs/screenshots/desktop-light.png) | ![Match centre, dark theme](docs/screenshots/desktop-dark.png) | ![Match centre on a phone, dark theme](docs/screenshots/mobile-dark.png) |
+
+- **Layout:** a sticky top bar (wordmark, tagline, personalisation controls, theme toggle), the score strip, then the pitch with tabs under it. From 1024 px wide the live feed has its own column beside the pitch. Below that the page is one column and the feed becomes the Moments tab. On a phone the top bar scrolls away, the controls sit in a two-by-two grid, and the lower-third sits under the pitch instead of covering it.
+- **Themes:** System, Light or Dark from the top bar. Every colour is a CSS custom property on `:root` in [`web/src/styles.css`](web/src/styles.css). The dark values apply under `[data-theme="dark"]`, or under `prefers-color-scheme: dark` when the viewer has chosen System. The choice is saved in `localStorage`, and a small script in `index.html` applies it before first paint. If storage throws (a private window or blocked site data), the page falls back to System and works the same. Body text and chip text pass WCAG AA contrast in both themes.
+- **Score strip:** clubs by short name in their fictional colours, the score, the match clock and period from `/state` (polled every second), and the feed's connection state as a live dot (Live, Connecting or Reconnecting). `/ws` reconnects on its own after 1 s, 2 s, 4 s, then every 8 s.
   - **Clock:** ticks smoothly between polls, at the rate the last two polls showed. A 30x replay counts up visibly instead of jumping 30 seconds at a time, and the clock stops at half-time and full-time.
-  - **Pitch:** drawn to real proportions on the data's 105 × 68 metre system, as an SVG whose units are metres. It has goals 7.32 m wide outside each goal line, 40.3 × 16.5 m penalty areas, 18.3 × 5.5 m six-yard boxes, penalty spots 11 m out, D arcs and the centre circle at 9.15 m, 1 m corner arcs, the halfway line and the centre spot. The stripes are mown. The pitch keeps its landscape aspect ratio at any container width.
+- **Pitch:** drawn to real proportions on the data's 105 × 68 metre system, as an SVG whose units are metres. It has goals 7.32 m wide outside each goal line, 40.3 × 16.5 m penalty areas, 18.3 × 5.5 m six-yard boxes, penalty spots 11 m out, D arcs and the centre circle at 9.15 m, 1 m corner arcs, the halfway line and the centre spot. The stripes are mown. The pitch keeps its landscape aspect ratio at any width.
   - **Players:** all 22 starters, in club colours with shirt numbers. Markers are placed by converting metres to percentages of the same box, with the home side attacking to the right. The layout rules live in [`web/src/pitchLayout.js`](web/src/pitchLayout.js):
     - Everyone sits on their formation slot from `data/league.json`, and the player on the ball is drawn at the event's coordinates. The events only carry coordinates for the player involved.
     - Both teams share one small shift toward the ball, capped at 6 m along the pitch and 3 m across, so the shape slides as a unit. Defenders move half of it, midfielders three quarters and forwards all of it; keepers stay on their line, moving at most 2 m.
     - Markers that land within 3 m of each other are nudged apart, but the player on the ball never moves.
   - **Movement:** players ease to their spots over 400 ms and the ball glides over 600 ms, so nothing teleports.
-- **Overlays:** overlays from `/ws` appear as lower thirds showing their headline, detail and why. Each stays for its own `duration_ms` and never appears before the match clock reaches its `show_at_ms`.
-  - **Two at once:** at most two are on screen; the rest queue in clock order.
-  - **Late viewers:** the queue keeps only the newest 4, so a late viewer's backlog doesn't play for minutes. The full history is in the recap.
-- **Personalisation panel:** persona (analyst, casual fan, player focus), favourite club, favourite player (the squads from `data/league.json`) and language.
-  - **Language:** English or Arabic. With Arabic, the overlay and recap text switch to right-to-left, right-aligned, with a font stack that shapes Arabic well. Scores are isolated left-to-right, because after an Arabic word the browser would otherwise show "1-0" as "0-1". The scoreboard, pitch and controls stay left-to-right.
-  - **Instant switching:** any change reconnects `/ws` with the new parameters. Overlays are keyed by moment, so the new socket's backlog swaps the on-screen text in place instead of queuing the moments again.
-- **Recap:** `/recap` for the current persona, newest first, refreshed every 5 seconds.
-- **Connection state:** shown as Live, Connecting or Reconnecting. `/ws` reconnects on its own after 1 s, 2 s, 4 s, then every 8 s.
+- **Lower-third:** one overlay at a time on the pitch, showing its headline, detail and why for its own `duration_ms`. It never appears before the match clock reaches its `show_at_ms`. When several are due, the highest `priority` goes first and the rest queue. The queue keeps only the newest 4, so a late viewer's backlog doesn't play for minutes.
+- **Live feed:** every overlay whose moment has come, as cards with a type chip, match clock, headline, detail and why, newest first. It is an `aria-live="polite"` region, so screen readers announce new moments. The lower-third is not, so nothing is announced twice.
+- **Tabs:** Moments (the feed on narrow screens; a one-line timeline beside the full feed on desktop), Stats (head-to-head team stats from `/state`: possession, shots, shots on target, expected goals, passes, pass accuracy, tackles and pressures won, top shot speed and momentum), Lineups (formation, manager, starting eleven and bench from `data/league.json`) and Recap (`/recap` for the current persona, newest first, refreshed every 5 seconds). The tabs follow the WAI-ARIA pattern: arrow keys, Home and End move between them.
+- **Personalisation:** persona (analyst, casual fan, player focus), language, favourite club and favourite player (the squads from `data/league.json`), as compact selects in the top bar.
+  - **Language:** English or Arabic. With Arabic, only the overlay, feed and recap text blocks switch to right-to-left, with a font stack that shapes Arabic well. Scores are isolated left-to-right, because after an Arabic word the browser would otherwise show "1-0" as "0-1". The score strip, pitch, clocks, chips and controls stay left-to-right.
+  - **Instant switching:** any change reconnects `/ws` with the new parameters. Overlays are keyed by moment, so the new socket's backlog swaps the text in place instead of queuing the moments again.
+- **Accessibility:** every control is a native button or select, reachable by keyboard with a visible focus ring in the accent colour. With `prefers-reduced-motion`, slide-ins, the live dot's pulse and player movement are switched off.
 
 ```bash
 # Terminal 1: the API, replaying seed 42 at 30x (no Azure needed)
@@ -259,7 +264,7 @@ REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl .venv/bin/uvicorn deepkick.ap
 # Terminal 2: the broadcast view on http://localhost:5173
 cd web && npm install && npm run dev
 
-# The pitch layout rules have tests (Node's built-in runner, no extra dependency)
+# The pitch layout and theme storage rules have tests (Node's built-in runner, no extra dependency)
 cd web && npm test
 ```
 
