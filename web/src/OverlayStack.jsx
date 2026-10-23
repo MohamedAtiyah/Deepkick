@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { clockMs, splitScores } from "./live.js";
+import { clockMs, dueOverlays, splitScores } from "./live.js";
 
 /** Text with every score isolated left-to-right, so "1-0" never displays as "0-1" in Arabic. */
 export const Text = ({ children }) =>
@@ -13,6 +13,7 @@ export const LABEL = { goal: "Goal", big_chance: "Big chance", half_time: "Half-
 
 export default function OverlayStack({ overlays, matchClock, lang }) {
   const handled = useRef(new Set()); // moments shown or dropped: never queued again, in any persona
+  const arrived = useRef(new Map()); // moment key -> match ms when it first reached the browser
   const [view, setView] = useState({ queue: [], onScreen: [] }); // queue: moment keys, oldest first
 
   // New moments join the queue; a moment already handled (now arriving in another persona) does not.
@@ -20,26 +21,26 @@ export default function OverlayStack({ overlays, matchClock, lang }) {
     setView((prev) => {
       const fresh = [...overlays.keys()].filter((key) => !handled.current.has(key) && !prev.queue.includes(key));
       if (!fresh.length) return prev;
+      fresh.forEach((key) => arrived.current.has(key) || arrived.current.set(key, clockMs(matchClock)));
       const queue = [...prev.queue, ...fresh].sort((a, b) => overlays.get(a).show_at_ms - overlays.get(b).show_at_ms);
       queue.slice(0, -QUEUE).forEach((key) => handled.current.add(key));
       return { ...prev, queue: queue.slice(-QUEUE) };
     });
   }, [overlays]);
 
-  // Every quarter second: retire overlays past their duration, then fill free slots with ones whose moment has come.
+  // Every quarter second: retire overlays past their duration, skip stale ones, then fill the free slot.
   useEffect(() => {
     const tick = setInterval(() => {
       const now = Date.now();
       const nowMs = clockMs(matchClock);
       setView((prev) => {
         const live = prev.onScreen.filter((item) => item.until > now);
-        const ready = prev.queue.filter((key) => overlays.get(key).show_at_ms <= nowMs)
-          .sort((a, b) => overlays.get(b).priority - overlays.get(a).priority).slice(0, SLOTS - live.length);
-        if (!ready.length && live.length === prev.onScreen.length) return prev;
-        ready.forEach((key) => handled.current.add(key));
+        const { show, stale, keep } = dueOverlays(prev.queue, overlays, nowMs, SLOTS - live.length, arrived.current);
+        if (!show.length && !stale.length && live.length === prev.onScreen.length) return prev;
+        [...show, ...stale].forEach((key) => handled.current.add(key));
         return {
-          queue: prev.queue.filter((key) => !ready.includes(key)),
-          onScreen: [...live, ...ready.map((key) => ({ key, until: now + overlays.get(key).duration_ms }))],
+          queue: keep,
+          onScreen: [...live, ...show.map((key) => ({ key, until: now + overlays.get(key).duration_ms }))],
         };
       });
     }, 250);
