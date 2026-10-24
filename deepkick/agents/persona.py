@@ -299,7 +299,9 @@ def casual_template(moment: dict[str, Any]) -> dict[str, str]:
             why = f"{CLUB_NAMES[leader]} win the match." if leader else "It ends all square."
         whistle = "Half-time" if kind == "half_time" else "Full-time"
         return {"headline": f"{whistle}: {_short(home)} {h}-{a} {_short(away)}",
-                "detail": f"{_short(home)} had {_count(ht, 'shot')} to {_possessive(_short(away))} {at}.", "why": why}
+                # Two plain clauses rather than "13 shots to Calderbrook's 17", which the Translator garbles.
+                "detail": f"{_short(home)} had {_count(ht, 'shot')} and {_short(away)} had {_count(at, 'shot')}.",
+                "why": why}
     if kind == "big_chance":
         return {"headline": f"Big chance for {who}",
                 "detail": f"The shot from {f['distance_m']} metres was {_OUTCOME[f['outcome']]}.",

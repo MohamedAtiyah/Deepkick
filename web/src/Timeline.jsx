@@ -13,8 +13,6 @@ function useTimeline(profile, overlayCount) {
   useEffect(() => {
     let alive = true;
     const params = new URLSearchParams({ persona: profile.persona, lang: profile.lang });
-    if (profile.club) params.set("club", profile.club);
-    if (profile.player) params.set("player", profile.player);
     const load = () =>
       fetch(`/timeline?${params}`)
         .then((r) => (r.ok ? r.json() : null))
@@ -26,7 +24,7 @@ function useTimeline(profile, overlayCount) {
       alive = false;
       clearInterval(id);
     };
-  }, [profile.persona, profile.lang, profile.club, profile.player, overlayCount]);
+  }, [profile.persona, profile.lang, overlayCount]);
   return data;
 }
 

@@ -14,11 +14,34 @@ URL = "https://api.cognitive.microsofttranslator.com"
 ARABIC = "ترجمة: "  # the fake Translator's "Arabic": a prefix on the protected HTML it was sent
 
 
+def spell(name):
+    """The fake transliteration: each Latin letter becomes an Arabic letter, so a name is all Arabic script."""
+    return "".join(chr(0x0627 + (ord(c.lower()) - ord("a")) % 20) if c.isalpha() else c for c in name)
+
+
+STUCK = "Fenn Grimsdyke"  # the live service hands this full name back unchanged; word by word it spells it
+
+
+def transliterated(request: httpx.Request) -> httpx.Response | None:
+    """The fake Translator's answer to a transliterate request, or None for any other request."""
+    if not request.url.path.endswith("/transliterate"):
+        return None
+    return httpx.Response(200, json=[{"text": item["Text"] if item["Text"] == STUCK else spell(item["Text"]),
+                                      "script": "Arab"} for item in json.loads(request.content)])
+
+
+def as_arabic(text, translator):
+    """What the fake Translator makes of `text`: names in Arabic script, glossary terms, the ARABIC prefix."""
+    return unprotect(ARABIC + protect(text, translator.names_for("ar"), glossary=True))
+
+
 def fake_translator(change=lambda text: text, fail=None):
-    """A Translator whose HTTP calls are answered in-process; `requests` records every call's texts."""
+    """A Translator whose HTTP calls are answered in-process; `requests` records every translate call's texts."""
     requests = []
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if (spelled := transliterated(request)) is not None:
+            return spelled
         texts = [item["Text"] for item in json.loads(request.content)]
         requests.append({"texts": texts, "params": dict(request.url.params), "headers": request.headers})
         if fail:
@@ -45,7 +68,7 @@ def big_chance(detected):
     return next(m for m, _ in detected if m["type"] == "big_chance")
 
 
-def test_arabic_comes_back_in_one_batched_call_with_names_kept_in_latin(goal):
+def test_arabic_comes_back_in_one_batched_call_with_names_in_arabic_script(goal):
     translator, requests = fake_translator()
     english = template_versions(goal)
     arabic = translate_versions(english, translator, "ar", goal["event_id"])
@@ -54,16 +77,43 @@ def test_arabic_comes_back_in_one_batched_call_with_names_kept_in_latin(goal):
     assert len(requests) == 1 and len(requests[0]["texts"]) <= 9 + len(labels)
     assert requests[0]["params"] == {"api-version": "3.0", "to": "ar", "textType": "html"}
     assert requests[0]["headers"]["ocp-apim-subscription-key"] == "test-key"
-    assert any('<span class="notranslate">Rafe Ironsby</span>' in t for t in requests[0]["texts"])
+    assert any(f'<span class="notranslate">{spell("Rafe Ironsby")}</span>' in t for t in requests[0]["texts"])
     for persona in PERSONAS:
         assert arabic[persona]["fallback"] is False
         for field in ("headline", "detail", "why"):
-            assert arabic[persona][field] == ARABIC + english[persona][field]  # spans stripped, names in Latin
+            assert arabic[persona][field] == as_arabic(english[persona][field], translator)  # spans stripped
         # Labels are translated; values are the English evidence's values, untouched.
-        assert [e["label"] for e in arabic[persona]["evidence"]] == [ARABIC + e["label"]
+        assert [e["label"] for e in arabic[persona]["evidence"]] == [as_arabic(e["label"], translator)
                                                                       for e in english[persona]["evidence"]]
         assert [e["value"] for e in arabic[persona]["evidence"]] == [e["value"] for e in english[persona]["evidence"]]
-    assert "Rafe Ironsby" in arabic["player"]["headline"] and "<span" not in arabic["player"]["headline"]
+    headline = arabic["player"]["headline"]
+    assert spell("Rafe Ironsby") in headline and "Rafe" not in headline and "<span" not in headline
+
+
+def test_names_are_transliterated_once_club_codes_stay_and_a_failure_keeps_latin(goal, monkeypatch):
+    translator, _ = fake_translator()
+    names = translator.names_for("ar")
+    assert names["Calderbrook Athletic"] == spell("Calderbrook Athletic") and "ASH" not in names
+    assert names[STUCK] == f"{spell('Fenn')} {spell('Grimsdyke')}"  # retried word by word
+    assert translator.names_for("ar") is names and translator.names_for("en") == {}  # cached; English untouched
+    calls = []
+
+    def down(request):
+        calls.append(request.url.path)
+        return httpx.Response(503)
+
+    broken = Translator("k", "r", URL, client=httpx.Client(transport=httpx.MockTransport(down)))
+    assert broken.names_for("ar") == {} and broken.names_for("ar") == {}
+    assert calls == ["/transliterate"]  # not retried on every translation
+    assert protect("Rafe Ironsby", {}) == '<span class="notranslate">Rafe Ironsby</span>'  # Latin, as before
+
+
+def test_football_terms_go_in_already_translated():
+    sent = protect("Full-time: Ashvale had 13 shots.", glossary=True)
+    kept = lambda words: f'<span class="notranslate">{words}</span>'  # noqa: E731
+    assert kept("نهاية المباراة") in sent and kept("تسديدات") in sent
+    assert "shots" not in sent and "Full-time" not in sent
+    assert "shots" in protect("Ashvale had 13 shots.")  # English and other languages are not changed
 
 
 def test_english_passes_through_with_no_call(goal):
@@ -139,6 +189,11 @@ def test_a_dropped_space_beside_a_protected_name_is_restored():
     returned = 'هذه هي أسرع جولة <span class="notranslate">Calderbrook Athletic</span>حتى الآن.'
     assert unprotect(returned) == "هذه هي أسرع جولة Calderbrook Athletic حتى الآن."
     assert unprotect("<span>Rafe Ironsby</span>تجري بسرعة") == "Rafe Ironsby تجري بسرعة"
+    # Seen live once names were in Arabic script: the name run into the next Arabic word ("أولابيفي").
+    assert unprotect('هدف <span class="notranslate">أولابي</span>في المباراة') == "هدف أولابي في المباراة"
+    # Also seen live: a number run into the next name ("17Calderbrook").
+    assert unprotect('على <span class="notranslate">17</span>Calderbrook.') == "على 17 Calderbrook."
+    assert unprotect("سجل 2-3 و 9.2 م") == "سجل 2-3 و 9.2 م"  # scores and decimals are left alone
 
 
 @pytest.mark.parametrize("endpoint, url", [
@@ -167,6 +222,8 @@ def test_a_429_backs_off_without_using_up_an_attempt(goal, monkeypatch):
     monkeypatch.setattr(narrative, "_sleep", waits.append)
 
     def handler(request):
+        if (spelled := transliterated(request)) is not None:
+            return spelled
         if replies:
             return replies.pop(0)
         texts = [item["Text"] for item in json.loads(request.content)]
