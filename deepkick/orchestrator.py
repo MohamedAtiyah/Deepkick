@@ -115,6 +115,13 @@ class Orchestrator:
         """Every overlay released so far for a viewer profile (default: the run's), in match-clock order."""
         return [select_overlay(m, v, profile or self.profile) for m, v in self._released]
 
+    def released_overlay(self, overlay_id: str, persona: str, lang: str) -> dict[str, Any] | None:
+        """The released overlay with this id for (persona, lang), or None if no released moment has that id."""
+        for moment, versions in self._released:
+            if f"{moment['moment_id']}-{persona}-{lang}" == overlay_id:
+                return select_overlay(moment, versions, self.profile | {"persona": persona, "lang": lang})
+        return None
+
     def summary(self) -> dict[str, Any]:
         """The run's counters so far (for /healthz and the end-of-run log)."""
         return {"events": self.counts["events"], "moments": self.counts["moments"],

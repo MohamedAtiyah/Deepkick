@@ -200,6 +200,7 @@ The 429 backoff itself (schedule, Retry-After, and not using up the normal attem
 | `GET /state` | the current match snapshot: score, clock, status, ball position, team stats with momentum, player stats |
 | `GET /recap?persona=&lang=&limit=` | overlays released so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona) in `en` or `ar` (default `en`), at most `limit` |
 | `WS /ws?persona=&club=&player=&lang=` | first every overlay already released for that viewer (so a late viewer isn't blank), then each new overlay as it's released |
+| `GET /speech/{overlay_id}?persona=…&lang=…` | the overlay's headline and detail spoken as `audio/mpeg`; 404 for an unknown overlay, 503 if synthesis failed (see [Spoken commentary](#9-spoken-commentary)) |
 | `GET /healthz` | the run status (`not_started`, `running`, `finished`, `failed`), where each stage gets its input (`replay` or `live`; `foundry` or `templates`), and the run counters |
 
 - **Startup:** the app starts the orchestrator in the background. It uses replay mode when `REPLAY_FILE` is set and live Event Hubs mode otherwise. It reads `.env` first.
@@ -252,6 +253,7 @@ curl localhost:8000/healthz
 - **Lower-third:** one overlay at a time on the pitch, showing its headline, detail and why for its own `duration_ms`. It never appears before the match clock reaches its `show_at_ms`. When several are due, the highest `priority` goes first and the rest queue. An overlay that has waited more than one match minute (counted from its `show_at_ms`, or from when it reached the browser if that was later) is skipped on the pitch, since the feed already has it; goals are never skipped. Without this, at 30x replay each 6–8 second lower-third holds the screen for 3–4 match minutes and the queue falls about 8 minutes behind; with it, lower-thirds trail the clock by 1–3 minutes, mostly the pipeline's own delay. The queue also keeps only the newest 4, so a late viewer's backlog doesn't play for minutes.
 - **Live feed:** every overlay whose moment has come, as cards with a type chip, match clock, headline, detail and why, newest first. Each card shows who wrote it ("AI-explained" or "Stats template") and a collapsible **How we know** list of the facts it cites (see [Explainability](#8-explainability)). It is an `aria-live="polite"` region, so screen readers announce new moments. The lower-third is not, so nothing is announced twice.
 - **Tabs:** Moments (the feed on narrow screens; a one-line timeline beside the full feed on desktop), Stats (head-to-head team stats from `/state`: possession, shots, shots on target, expected goals, passes, pass accuracy, tackles and pressures won, top shot speed and momentum), Lineups (formation, manager, starting eleven and bench from `data/league.json`) and Recap (`/recap` for the current persona, newest first, refreshed every 5 seconds). The tabs follow the WAI-ARIA pattern: arrow keys, Home and End move between them.
+- **Commentary:** a toggle in the top bar speaks each new overlay aloud. See [Spoken commentary](#9-spoken-commentary).
 - **Personalisation:** persona (analyst, casual fan, player focus), language, favourite club and favourite player (the squads from `data/league.json`), as compact selects in the top bar.
   - **Language:** English or Arabic. With Arabic, only the overlay, feed and recap text blocks switch to right-to-left, with a font stack that shapes Arabic well. Scores are isolated left-to-right, because after an Arabic word the browser would otherwise show "1-0" as "0-1". The score strip, pitch, clocks, chips and controls stay left-to-right.
   - **Instant switching:** any change reconnects `/ws` with the new parameters. Overlays are keyed by moment, so the new socket's backlog swaps the text in place instead of queuing the moments again.
@@ -340,3 +342,41 @@ Every overlay says how it knows what it says. Its payload carries:
   - **Labels** come from one dict, `FACT_LABELS` in [`deepkick/agents/persona.py`](deepkick/agents/persona.py), keyed by dotted fact key with `{club}` for a club code (`momentum.CAL.value` becomes "Calderbrook momentum"). A test checks that every fact key in the seed-42 replay has a readable label. For Arabic, labels are translated in the moment's one Translator batch and cached; values are untouched.
 
 Together with the number checks (a narrative may only cite numbers present in the match state passed to the model), a viewer can see which facts a caption rests on and whether a model or a template wrote it.
+
+## 9. Spoken commentary
+
+[`deepkick/agents/speech.py`](deepkick/agents/speech.py) turns an overlay into a short MP3 with Azure AI Speech, and the broadcast view plays it.
+
+- **What is said:** the overlay's headline, then its detail. Arabic overlays use the text the translate step already produced.
+- **Voices:** one neural voice per persona and language. English uses en-GB voices: Ryan (analyst), Sonia (casual) and Thomas (player). Arabic uses Hamed and Zariyah (ar-SA) and Hamdan (ar-AE). Persona style comes from SSML prosody only: the analyst speaks 5% slower, the casual voice 10% faster and 5% higher, and the player voice at its default.
+  - **Checking the voices:** `python -m deepkick.agents.speech --check-voices` confirms every voice against the region's voices/list. All six were also synthesized live through `/speech`.
+- **Call:** the REST text-to-speech endpoint `https://<region>.tts.speech.microsoft.com/cognitiveservices/v1`, with SSML and `audio-24khz-48kbitrate-mono-mp3` output, through `httpx` with no extra SDK. All text is XML-escaped, so a name like "Calderbrook Athletic's" or an "&" can't break the SSML.
+- **Failure recovery:** a 10-second timeout and 2 attempts. A 429 waits 2 s, 4 s, then 8 s (or Retry-After) without using up an attempt, as for model calls. After that, `synthesize` returns `None` and logs `stage=speech event_id=… duration_ms=… fallback=yes`. A failure is never cached, so a later request can still succeed.
+- **Cache:** clips are cached by `(overlay_id, persona, lang)`, so every viewer and every replay of a moment reuses one synthesis.
+- **API:** `GET /speech/{overlay_id}?persona=…&lang=…` returns `audio/mpeg`. It returns 404 for an overlay that hasn't been released (or whose id doesn't match the persona and language asked for), 422 for an unknown persona or language, and 503 when synthesis failed or `AZURE_SPEECH_*` is unset.
+- **Broadcast view:** the **Commentary** toggle in the top bar is off by default, because browsers block audio until the viewer clicks. When it's on:
+  - Each overlay that reaches the feed from then on plays through one queue, in match order, using the current persona and language.
+  - A clip that has waited more than 15 seconds is skipped, so the audio never lags the match. This is real seconds since the overlay reached the feed; match time wouldn't work, because at 30x replay every clip would be minutes "late".
+  - Switching the toggle off stops the audio immediately and clears the queue.
+  - On a 503 the view stays silent; the text overlay is unaffected.
+
+```bash
+# Confirm the six voices exist in your Speech region (reads AZURE_SPEECH_KEY and AZURE_SPEECH_REGION from .env)
+.venv/bin/python -m deepkick.agents.speech --check-voices
+
+# Speak one line to an MP3 file
+.venv/bin/python -m deepkick.agents.speech --say "Calderbrook Athletic lead 1-0" --persona analyst --out commentary.mp3
+```
+
+**Azure service:** Azure AI Speech, text to speech (`AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` in `.env`). Without them, `/speech` returns 503 and the match centre stays silent.
+
+**Tests:** [`tests/test_speech.py`](tests/test_speech.py) mocks the Speech endpoint with `httpx.MockTransport`. It covers:
+- SSML escaping of apostrophes, ampersands and markup, and the words spoken round-tripping exactly;
+- a voice for every persona and language;
+- the request's URL and headers;
+- a cache hit;
+- failures (HTTP 500, timeout) returning `None` after 2 attempts, uncached;
+- a 429 retried without using an attempt;
+- `/speech` returning MP3, 404, 422 and 503.
+
+[`web/src/commentary.test.js`](web/src/commentary.test.js) checks that clips more than 15 seconds stale are skipped.

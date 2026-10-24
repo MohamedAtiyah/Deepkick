@@ -11,6 +11,7 @@ export default defineConfig({
       "/state": api,
       "/recap": api,
       "/healthz": api,
+      "/speech": api,
       "/ws": { target: "ws://localhost:8000", ws: true },
     },
   },

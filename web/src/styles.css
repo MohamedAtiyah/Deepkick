@@ -105,6 +105,20 @@ button, select { font: inherit; color: inherit; }
   font-size: 13px;
 }
 
+.toggle {
+  align-self: flex-end;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.toggle::before { content: "🔈 "; }
+.toggle[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.toggle[aria-pressed="true"]::before { content: "🔊 "; }
+
 .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; align-self: flex-end; }
 .segmented button {
   padding: 6px 10px;
