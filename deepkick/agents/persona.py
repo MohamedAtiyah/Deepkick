@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from deepkick.agents.narrative import (_OUTCOME, HEADLINE_MAX, POSITION_WORDS, TIMEOUT_S, _clip, _count, _possessive,
-                                       allowed_numbers, ask_with_retry, check_numbers, client_from_env,
+from deepkick.agents.narrative import (_OUTCOME, HEADLINE_MAX, POSITION_WORDS, TIMEOUT_S, _clip, _count, _leaves,
+                                       _possessive, allowed_numbers, ask_with_retry, check_numbers, client_from_env,
                                        spell_out_positions, template_narrative)
 from deepkick.contracts import PERSONAS, validate_overlay
 from deepkick.simulator import clock_seconds, load_league
@@ -164,11 +164,79 @@ _FACT_WORDS = {
 }
 
 
-def key_facts(moment: dict[str, Any], evidence: list[dict[str, Any]], limit: int = 4) -> list[str]:
+# Readable labels for the "How we know" panel, by dotted fact key; {club} stands for a club code and is shown as the
+# club's short name. "<moment type>:<key>" overrides a key whose meaning depends on the moment.
+FACT_LABELS = {
+    "xg": "Expected goals", "team_xg": "Team expected goals", "distance_m": "Shot distance (m)",
+    "distance_milestone:distance_m": "Distance covered (m)", "milestone_km": "Milestone (km)",
+    "team_shots": "Team shots", "shots": "Shots in the spell", "window_minutes": "Window (minutes)",
+    "x_m": "Ball won (m up the pitch)", "team_pressures_won": "Team pressures won", "player_goals": "Goals this match",
+    "shot_speed_kmh": "Shot speed (km/h)", "shot_distance_m": "Shot distance (m)",
+    "player_top_shot_speed_kmh": "Player's fastest shot (km/h)",
+    "team_top_shot_speed_kmh": "Team's fastest shot (km/h)",
+    "run_speed_kmh": "Run speed (km/h)", "run_distance_m": "Run distance (m)",
+    "team_top_run_speed_kmh": "Team's fastest run (km/h)",
+    "passes": "Passes", "passes_completed": "Passes completed", "pass_accuracy_pct": "Pass accuracy (%)",
+    "score.{club}": "{club} goals",
+    "momentum.{club}.value": "{club} momentum", "momentum.{club}.shots": "{club} shots in the spell",
+    "momentum.{club}.xg": "{club} expected goals in the spell",
+    "momentum.{club}.possession_pct": "{club} possession in the spell (%)",
+    "momentum.{club}.final_third_entries": "{club} final-third entries",
+    "teams.{club}.shots": "{club} shots", "teams.{club}.shots_on_target": "{club} shots on target",
+    "teams.{club}.xg": "{club} expected goals", "teams.{club}.possession_pct": "{club} possession (%)",
+    "teams.{club}.pass_accuracy_pct": "{club} pass accuracy (%)",
+}
+
+
+def fact_label(stat: str, moment_type: str) -> str:
+    """The readable label for a dotted fact key, such as momentum.CAL.value -> "Calderbrook momentum"."""
+    club = next((part for part in stat.split(".") if part in CLUB_NAMES), None)
+    key = ".".join("{club}" if part == club else part for part in stat.split("."))
+    label = FACT_LABELS.get(f"{moment_type}:{key}") or FACT_LABELS.get(key)
+    if label is None:
+        log.warning("stage=persona no label for fact %s; showing the key", stat)
+        return stat
+    return label.format(club=_short(club)) if club else label
+
+
+def cited(moment: dict[str, Any], stats: list[str]) -> list[dict[str, Any]]:
+    """Evidence items {stat, label, value} for the numeric facts named in `stats`, values copied from the facts."""
+    facts = dict(_leaves(moment["facts"]))
+    return [{"stat": stat, "label": fact_label(stat, moment["type"]), "value": facts[stat]}
+            for stat in dict.fromkeys(stats) if stat in facts]
+
+
+class _Reads(dict):
+    """Moment facts that note the dotted path of every value read, so a template's evidence is exactly what it used."""
+
+    def __init__(self, data: dict[str, Any], seen: list[str], path: str = "") -> None:
+        super().__init__(data)
+        self._seen, self._path = seen, path
+
+    def _note(self, key: str, value: Any) -> Any:
+        path = f"{self._path}.{key}" if self._path else str(key)
+        if isinstance(value, dict):
+            return _Reads(value, self._seen, path)
+        self._seen.append(path)
+        return value
+
+    def __getitem__(self, key: str) -> Any:
+        return self._note(key, super().__getitem__(key))
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self[key] if key in self else default
+
+    def items(self) -> list[tuple[str, Any]]:  # type: ignore[override]
+        return [(key, self._note(key, value)) for key, value in super().items()]
+
+
+def key_facts(moment: dict[str, Any], evidence: list[dict[str, Any]], limit: int = 4,
+              used: list[str] | None = None) -> list[str]:
     """Evidence in plain words for the analyst template, most telling first.
 
     The score keeps both sides, unknown keys are skipped, and the score and the player's goal tally lead,
-    then facts about the moment's own team, then the other club's.
+    then facts about the moment's own team, then the other club's. The stats behind the phrases returned are
+    added to `used`.
     """
     facts = moment["facts"]
     team = CLUB_NAMES.get(moment["team"], moment["team"]) if moment["team"] else "The match"
@@ -191,11 +259,15 @@ def key_facts(moment: dict[str, Any], evidence: list[dict[str, Any]], limit: int
             continue
         lead = parts[0] == "score" or parts[-1] == "player_goals"
         other_club = len(parts) > 1 and parts[-2] != moment["team"]
-        ranked.append((0 if lead else 2 if other_club else 1, phrase))
+        ranked.append((0 if lead else 2 if other_club else 1, phrase, item["stat"]))
     out: list[str] = []
-    for _, phrase in sorted(ranked, key=lambda r: r[0]):
+    stats: dict[str, list[str]] = {}
+    for _, phrase, stat in sorted(ranked, key=lambda r: r[0]):
+        stats.setdefault(phrase, []).append(stat)  # both sides of a score share one phrase
         if phrase not in out:
             out.append(phrase)
+    if used is not None:
+        used.extend(stat for phrase in out[:limit] for stat in stats[phrase])
     return out[:limit]
 
 
@@ -360,17 +432,24 @@ def template_versions(moment: dict[str, Any]) -> dict[str, Any]:
     """Build all three versions from the moment facts alone, each with its own headline and `fallback: true`.
 
     Nothing comes from the narrative, which may be model-written, so a templated version is wholly template.
+    Each version's `evidence` is the numeric facts its template read.
     """
-    narrative = template_narrative(moment, {"teams": {cid: {"name": name} for cid, name in CLUB_NAMES.items()}})
-    numbers = ", ".join(key_facts(moment, narrative["evidence"]))
+    seen: dict[str, list[str]] = {p: [] for p in PERSONAS}
+    reads = {p: moment | {"facts": _Reads(moment["facts"], seen[p])} for p in PERSONAS}
+    analyst = reads["analyst"]
+    narrative = template_narrative(analyst, {"teams": {cid: {"name": name} for cid, name in CLUB_NAMES.items()}})
+    numbers = ", ".join(key_facts(analyst, narrative["evidence"], used=seen["analyst"]))
     why = narrative["why_it_matters"]
-    casual, player = casual_template(moment), player_template(moment)
+    headline = analyst_headline(analyst)
+    casual, player = casual_template(reads["casual"]), player_template(reads["player"])
     return {
-        "analyst": {"headline": _clip(analyst_headline(moment)),
-                    "detail": f"The key numbers are {numbers}." if numbers else why, "why": why, "fallback": True},
-        "casual": casual | {"headline": _clip(casual["headline"]), "fallback": True},
+        "analyst": {"headline": _clip(headline), "detail": f"The key numbers are {numbers}." if numbers else why,
+                    "why": why, "evidence": cited(moment, seen["analyst"]), "fallback": True},
+        "casual": casual | {"headline": _clip(casual["headline"]), "evidence": cited(moment, seen["casual"]),
+                            "fallback": True},
         # Player headlines start with the name, so clipping can never cut it.
-        "player": player | {"headline": _clip(player["headline"]), "fallback": True},
+        "player": player | {"headline": _clip(player["headline"]), "evidence": cited(moment, seen["player"]),
+                            "fallback": True},
     }
 
 
@@ -392,7 +471,7 @@ def select_overlay(moment: dict[str, Any], versions: dict[str, Any], profile: di
     elif club and moment["team"] and moment["type"] != "goal" and priority <= LOW_PRIORITY:
         priority = 1  # a small moment for the other club; goals always keep their priority
     persona, lang = profile.get("persona"), profile.get("lang", "en")
-    version = versions.get(persona) or {}
+    english = version = versions.get(persona) or {}
     if lang != "en":  # the translated version, if the Translator step made one; else the English text ships
         version = versions.get("translations", {}).get(lang, {}).get(persona) or version
     overlay = {
@@ -405,7 +484,10 @@ def select_overlay(moment: dict[str, Any], versions: dict[str, Any], profile: di
         "persona": persona,
         "lang": lang,
         "payload": {"player": moment["player"]["name"] if moment["player"] else None,
-                    **{k: version.get(k) for k in VERSION_KEYS}},
+                    **{k: version.get(k) for k in VERSION_KEYS},
+                    "evidence": [{"label": e["label"], "value": e["value"]}
+                                 for e in version.get("evidence", english.get("evidence", []))],
+                    "source": "template" if english.get("fallback", True) else "model"},
     }
     validate_overlay(overlay)
     return overlay
@@ -437,7 +519,7 @@ class PersonaAgent:
             except Exception:
                 log.exception("stage=persona event_id=%s could not build persona versions", event_id)
                 line = {"headline": "Key moment", "detail": "A key moment in the match.", "why": "It shapes the match.",
-                        "fallback": True}
+                        "evidence": [], "fallback": True}
                 result = {persona: dict(line) for persona in PERSONAS}
             self.cache[moment["moment_id"]] = result
         result = self.cache[moment["moment_id"]]
@@ -457,7 +539,9 @@ class PersonaAgent:
         raw, templates, out, failed = parse_versions(content), template_versions(moment), {}, {}
         for persona in PERSONAS:
             try:
-                out[persona] = check_version(persona, raw[persona], inputs) | {"fallback": False}
+                # The model version cites the narrative's evidence, whose stats check_output matched to the facts.
+                out[persona] = check_version(persona, raw[persona], inputs) | {
+                    "evidence": cited(moment, [e["stat"] for e in narrative["evidence"]]), "fallback": False}
             except ValueError as exc:
                 out[persona], failed[persona] = templates[persona], exc
         if len(failed) == len(PERSONAS):

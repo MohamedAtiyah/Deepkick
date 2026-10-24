@@ -68,6 +68,8 @@ OVERLAY_FIELDS = frozenset(
 )
 PERSONAS = ("analyst", "casual", "player")
 LANGS = ("en", "ar")
+PAYLOAD_FIELDS = frozenset({"player", "headline", "detail", "why", "evidence", "source"})
+SOURCES = ("model", "template")  # who wrote the overlay text: the Foundry model or a stats template
 
 
 def validate_overlay(overlay: dict[str, Any]) -> None:
@@ -93,13 +95,24 @@ def validate_overlay(overlay: dict[str, Any]) -> None:
     if overlay["lang"] not in LANGS:
         raise ValueError(f"lang must be one of {LANGS}, got {overlay['lang']!r}")
     payload = overlay["payload"]
-    if not isinstance(payload, dict) or payload.keys() != {"player", "headline", "detail", "why"}:
-        raise ValueError("payload must have exactly player, headline, detail, why")
+    if not isinstance(payload, dict) or payload.keys() != PAYLOAD_FIELDS:
+        raise ValueError("payload must have exactly player, headline, detail, why, evidence, source")
     if payload["player"] is not None and (not isinstance(payload["player"], str) or not payload["player"]):
         raise ValueError("payload.player must be a player name or null")
     for key in ("headline", "detail", "why"):
         if not isinstance(payload[key], str) or not payload[key].strip():
             raise ValueError(f"payload.{key} must be a non-empty string")
+    if payload["source"] not in SOURCES:
+        raise ValueError(f"payload.source must be one of {SOURCES}, got {payload['source']!r}")
+    evidence = payload["evidence"]
+    if not isinstance(evidence, list) or not all(
+            isinstance(e, dict) and e.keys() == {"label", "value"} and isinstance(e["label"], str)
+            and e["label"].strip() and _is_number(e["value"]) for e in evidence):
+        raise ValueError("payload.evidence must be a list of {label, value} with a non-empty label and a number")
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _is_int(value: Any) -> bool:

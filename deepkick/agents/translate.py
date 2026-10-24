@@ -105,15 +105,18 @@ def translate_versions(versions: dict[str, Any], translator: Translator | None, 
                        event_id: str | None) -> dict[str, dict[str, Any]]:
     """The three persona versions in `lang`. Each is wholly translated, or the English text with `fallback: true`.
 
+    Evidence labels go in the same batch and translate with their version; evidence values are never touched.
     A version falls back if the Translator fails after ATTEMPTS tries or if any number was lost or altered.
     A 429 waits out RATE_LIMIT_BACKOFF_S (or Retry-After) without using up an attempt, as for model calls.
     "en" passes through with no call. Never raises.
     """
     english = {p: {k: versions[p][k] for k in FIELDS} for p in PERSONAS}
+    evidence = {p: versions[p].get("evidence", []) for p in PERSONAS}
     if lang == "en":
-        return {p: english[p] | {"fallback": False} for p in PERSONAS}
+        return {p: english[p] | {"evidence": evidence[p], "fallback": False} for p in PERSONAS}
     start, translated = time.monotonic(), None
-    texts = [english[p][k] for p in PERSONAS for k in FIELDS]
+    labels = [e["label"] for p in PERSONAS for e in evidence[p]]
+    texts = [english[p][k] for p in PERSONAS for k in FIELDS] + labels
     attempt, backoffs = 1, iter(RATE_LIMIT_BACKOFF_S)
     while translator and attempt <= ATTEMPTS:
         try:
@@ -133,7 +136,9 @@ def translate_versions(versions: dict[str, Any], translator: Translator | None, 
     out = {}
     for p in PERSONAS:
         kept = translated is not None and all(same_numbers(english[p][k], translated[english[p][k]]) for k in FIELDS)
-        out[p] = ({k: translated[english[p][k]] for k in FIELDS} if kept else dict(english[p])) | {"fallback": not kept}
+        out[p] = ({k: translated[english[p][k]] for k in FIELDS} if kept else dict(english[p])) | {
+            "evidence": [e | {"label": translated[e["label"]]} for e in evidence[p]] if kept else evidence[p],
+            "fallback": not kept}
         if translated is not None and not kept:
             log.warning("stage=translate event_id=%s persona=%s fallback=yes: a number was lost or altered",
                         event_id, p)

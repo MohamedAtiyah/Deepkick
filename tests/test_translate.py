@@ -30,6 +30,11 @@ def fake_translator(change=lambda text: text, fail=None):
     return translator, requests
 
 
+def _english(version):
+    """A version as translate_versions returns it untranslated: its text and its English evidence."""
+    return {k: version[k] for k in ("headline", "detail", "why", "evidence")}
+
+
 @pytest.fixture(scope="module")
 def goal(detected):
     return next(m for m, _ in detected if m["type"] == "goal")
@@ -44,7 +49,9 @@ def test_arabic_comes_back_in_one_batched_call_with_names_kept_in_latin(goal):
     translator, requests = fake_translator()
     english = template_versions(goal)
     arabic = translate_versions(english, translator, "ar", goal["event_id"])
-    assert len(requests) == 1 and len(requests[0]["texts"]) <= 9  # all three personas' fields, deduplicated
+    labels = {e["label"] for p in PERSONAS for e in english[p]["evidence"]}
+    # All three personas' fields and every evidence label, deduplicated, in one call.
+    assert len(requests) == 1 and len(requests[0]["texts"]) <= 9 + len(labels)
     assert requests[0]["params"] == {"api-version": "3.0", "to": "ar", "textType": "html"}
     assert requests[0]["headers"]["ocp-apim-subscription-key"] == "test-key"
     assert any('<span class="notranslate">Rafe Ironsby</span>' in t for t in requests[0]["texts"])
@@ -52,6 +59,10 @@ def test_arabic_comes_back_in_one_batched_call_with_names_kept_in_latin(goal):
         assert arabic[persona]["fallback"] is False
         for field in ("headline", "detail", "why"):
             assert arabic[persona][field] == ARABIC + english[persona][field]  # spans stripped, names in Latin
+        # Labels are translated; values are the English evidence's values, untouched.
+        assert [e["label"] for e in arabic[persona]["evidence"]] == [ARABIC + e["label"]
+                                                                      for e in english[persona]["evidence"]]
+        assert [e["value"] for e in arabic[persona]["evidence"]] == [e["value"] for e in english[persona]["evidence"]]
     assert "Rafe Ironsby" in arabic["player"]["headline"] and "<span" not in arabic["player"]["headline"]
 
 
@@ -60,7 +71,7 @@ def test_english_passes_through_with_no_call(goal):
     english = template_versions(goal)
     out = translate_versions(english, translator, "en", goal["event_id"])
     assert requests == []
-    assert all(out[p] == {k: english[p][k] for k in ("headline", "detail", "why")} | {"fallback": False}
+    assert all(out[p] == _english(english[p]) | {"fallback": False}
                for p in PERSONAS)
 
 
@@ -82,7 +93,7 @@ def test_a_dropped_number_falls_back_to_english_for_that_version(goal, caplog):
     with caplog.at_level(logging.INFO, logger="deepkick.translate"):
         arabic = translate_versions(english, translator, "ar", goal["event_id"])
     assert "1-0" in target
-    assert arabic["casual"] == {k: english["casual"][k] for k in ("headline", "detail", "why")} | {"fallback": True}
+    assert arabic["casual"] == _english(english["casual"]) | {"fallback": True}
     assert arabic["analyst"]["fallback"] is False and arabic["analyst"]["headline"].startswith(ARABIC)
     assert f"event_id={goal['event_id']} persona=casual fallback=yes" in caplog.text
 
@@ -103,7 +114,7 @@ def test_a_timeout_falls_back_to_english_with_the_flag_after_the_usual_attempts(
         arabic = translate_versions(english, translator, "ar", goal["event_id"])
     assert len(requests) == 2  # the first call plus one retry, as everywhere else
     for persona in PERSONAS:
-        assert arabic[persona] == {k: english[persona][k] for k in ("headline", "detail", "why")} | {"fallback": True}
+        assert arabic[persona] == _english(english[persona]) | {"fallback": True}
     assert "ReadTimeout" in caplog.text
     assert f"stage=translate event_id={goal['event_id']} duration_ms=" in caplog.text and "fallback=yes" in caplog.text
 

@@ -6,9 +6,10 @@ import logging
 
 import pytest
 
-from deepkick.agents.narrative import TIMEOUT_S, template_narrative
-from deepkick.agents.persona import (OVERLAY_PRIORITY, SYSTEM_PROMPT, PersonaAgent, check_version, key_facts,
-                                     parse_versions, persona_inputs, select_overlay, template_versions)
+from deepkick.agents.narrative import TIMEOUT_S, _leaves, template_narrative
+from deepkick.agents.persona import (FACT_LABELS, OVERLAY_PRIORITY, SYSTEM_PROMPT, PersonaAgent, check_version, cited,
+                                     fact_label, key_facts, parse_versions, persona_inputs, select_overlay,
+                                     template_versions)
 from deepkick.contracts import PERSONAS, validate_overlay
 from deepkick.moments import PRIORITY
 from tests.conftest import FakeClient, timeout_error
@@ -23,6 +24,11 @@ def narrated(detected):
 @pytest.fixture(scope="module")
 def goal(narrated):
     return next((m, n) for m, n in narrated if m["type"] == "goal")
+
+
+def _model_evidence(moment, narrative):
+    """What a model-written version cites: the narrative's checked evidence, values copied from the facts."""
+    return cited(moment, [e["stat"] for e in narrative["evidence"]])
 
 
 def _of(narrated, kind, team=None):
@@ -155,7 +161,7 @@ def test_one_failed_version_is_templated_alone(goal, caplog):
     assert len(client.calls) == 1  # no retry: the other two versions are kept
     assert versions["analyst"] == template_versions(moment)["analyst"]
     for persona in ("casual", "player"):
-        assert versions[persona] == reply[persona] | {"fallback": False}
+        assert versions[persona] == reply[persona] | {"evidence": _model_evidence(moment, narrative), "fallback": False}
     assert f"event_id={moment['event_id']} persona=analyst fallback=yes: numbers not in the inputs" in caplog.text
     assert "fallback=yes sources=analyst:template,casual:model,player:model cached=no" in caplog.text
 
@@ -171,7 +177,9 @@ def test_a_templated_version_never_mixes_in_model_text(goal):
     assert versions["casual"] == template_versions(moment)["casual"]
     for persona in PERSONAS:
         assert "Model" not in " ".join(template_versions(moment)[persona][k] for k in ("headline", "detail", "why"))
-    assert versions["analyst"] == reply["analyst"] | {"fallback": False}  # model versions stay wholly model
+    # Model versions stay wholly model.
+    assert versions["analyst"] == reply["analyst"] | {"evidence": _model_evidence(moment, model_narrative),
+                                                      "fallback": False}
 
 
 def test_every_version_failing_retries_then_falls_back(goal):
@@ -420,3 +428,49 @@ def test_a_bare_number_reply_is_retried(goal):
     client = FakeClient(json.dumps(bare), _good_reply(moment))
     versions = PersonaAgent(client, "m").versions(moment, narrative)
     assert len(client.calls) == 2 and not any(v["fallback"] for v in versions.values())
+
+
+def _check_evidence(moment, version, overlay):
+    """Every evidence value equals its fact's value, and the overlay shows exactly the version's labels and values."""
+    facts = dict(_leaves(moment["facts"]))
+    assert all(e["value"] == facts[e["stat"]] for e in version["evidence"])
+    assert overlay["payload"]["evidence"] == [{"label": e["label"], "value": e["value"]} for e in version["evidence"]]
+
+
+def test_template_evidence_is_the_facts_each_template_read(narrated):
+    for moment, _ in narrated:
+        versions = template_versions(moment)
+        for persona in PERSONAS:
+            overlay = select_overlay(moment, versions, _profile(persona))
+            assert overlay["payload"]["source"] == "template" and overlay["payload"]["evidence"], moment["type"]
+            _check_evidence(moment, versions[persona], overlay)
+    goal = next(m for m, _ in narrated if m["type"] == "goal")
+    # The casual goal template says the scorer, the score, their goal tally and the distance; not xG or team shots.
+    stats = [e["stat"] for e in template_versions(goal)["casual"]["evidence"]]
+    assert sorted(stats) == sorted([*(f"score.{c}" for c in goal["facts"]["score"]), "player_goals", "distance_m"])
+
+
+def test_model_evidence_is_the_narratives_checked_facts(goal):
+    moment, narrative = goal
+    f = moment["facts"]
+    # A model narrative cites a few facts; its values are re-copied from the facts, never taken from model text.
+    model_narrative = narrative | {"fallback": False,
+                                   "evidence": [{"stat": "xg", "value": f["xg"]}, {"stat": "score.CAL", "value": 1}]}
+    versions = PersonaAgent(FakeClient(_good_reply(moment)), "m").versions(moment, model_narrative)
+    for persona in PERSONAS:
+        overlay = select_overlay(moment, versions, _profile(persona))
+        assert overlay["payload"]["source"] == "model"
+        assert overlay["payload"]["evidence"] == [{"label": "Expected goals", "value": f["xg"]},
+                                                  {"label": "Calderbrook goals", "value": f["score"]["CAL"]}]
+        _check_evidence(moment, versions[persona], overlay)
+
+
+def test_every_fact_key_has_a_readable_label(narrated):
+    for moment, _ in narrated:
+        for stat, _ in _leaves(moment["facts"]):
+            label = fact_label(stat, moment["type"])
+            assert label != stat and "_" not in label and "ASH" not in label and "CAL" not in label, stat
+    assert fact_label("momentum.CAL.value", "momentum_swing") == "Calderbrook momentum"
+    assert fact_label("distance_m", "goal") == "Shot distance (m)"
+    assert fact_label("distance_m", "distance_milestone") == "Distance covered (m)"
+    assert {"passes", "passes_completed", "pass_accuracy_pct"} <= FACT_LABELS.keys()  # pass milestones: not in seed 42
