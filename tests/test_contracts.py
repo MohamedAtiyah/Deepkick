@@ -58,7 +58,10 @@ def _overlay():
     return {"overlay_id": "ASH-CAL-42-00208-goal-analyst-en", "type": "goal", "match_clock": "13:52",
             "show_at_ms": 832000, "duration_ms": 8000, "priority": 5, "persona": "analyst", "lang": "en",
             "payload": {"player": "Rafe Ironsby", "headline": "Rafe Ironsby opens the scoring",
-                        "detail": "A 0.252 xG chance.", "why": "It makes the score ASH 0-1 CAL."}}
+                        "detail": "A 0.252 xG chance.", "why": "It makes the score ASH 0-1 CAL.",
+                        "evidence": [{"label": "Expected goals", "value": 0.252},
+                                     {"label": "Calderbrook goals", "value": 1}],
+                        "source": "model"}}
 
 
 @pytest.mark.parametrize("mutate", [
@@ -66,6 +69,7 @@ def _overlay():
     lambda o: o["payload"].update(player=None),  # match-wide moments have no player
     lambda o: o.update(persona="casual", lang="ar", priority=1),
     lambda o: o.update(lang="en"),
+    lambda o: o["payload"].update(source="template", evidence=[]),  # the last-resort line cites nothing
 ])
 def test_valid_overlays_pass(mutate):
     overlay = _overlay()
@@ -90,6 +94,13 @@ def test_valid_overlays_pass(mutate):
     (lambda o: o["payload"].pop("why"), "payload"),
     (lambda o: o["payload"].update(player=""), "payload.player"),
     (lambda o: o["payload"].update(headline=" "), "payload.headline"),
+    (lambda o: o["payload"].pop("source"), "payload"),
+    (lambda o: o["payload"].update(source="ai"), "payload.source"),
+    (lambda o: o["payload"].update(evidence={"Expected goals": 0.252}), "payload.evidence"),
+    (lambda o: o["payload"]["evidence"].append({"label": "Outcome", "value": "saved"}), "payload.evidence"),
+    (lambda o: o["payload"]["evidence"].append({"label": "Opener", "value": True}), "payload.evidence"),
+    (lambda o: o["payload"]["evidence"].append({"label": " ", "value": 1}), "payload.evidence"),
+    (lambda o: o["payload"]["evidence"].append({"stat": "xg", "label": "xG", "value": 1}), "payload.evidence"),
 ])
 def test_rejects_broken_overlays(mutate, message):
     overlay = _overlay()

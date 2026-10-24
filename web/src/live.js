@@ -109,3 +109,20 @@ const SCORE = /(\d+(?:\.\d+)?(?:\s?[-–]\s?\d+(?:\.\d+)?)+)/;
 export function splitScores(text) {
   return text.split(SCORE).filter(Boolean).map((part) => [part, SCORE.test(part) && /^\d/.test(part)]);
 }
+
+// At replay speed each lower-third holds the screen for many match minutes, so the queue falls behind the clock.
+const STALE_MS = 60_000; // waited over a match minute: the feed already has it, so skip it on the pitch
+const ALWAYS_SHOWN = 5; // goals: shown late rather than never
+
+/** Split the lower-third queue at match time `nowMs` into what to show now (up to `free`, highest priority first),
+ *  what has waited too long to show at all, and what keeps waiting. `arrivedMs` maps a key to the match time it
+ *  reached the browser: an overlay that arrives late (the pipeline takes real seconds) still gets its turn. */
+export function dueOverlays(queue, overlays, nowMs, free, arrivedMs = new Map()) {
+  const stale = queue.filter((key) => {
+    const o = overlays.get(key);
+    return Math.max(o.show_at_ms, arrivedMs.get(key) ?? 0) < nowMs - STALE_MS && o.priority < ALWAYS_SHOWN;
+  });
+  const show = queue.filter((key) => !stale.includes(key) && overlays.get(key).show_at_ms <= nowMs)
+    .sort((a, b) => overlays.get(b).priority - overlays.get(a).priority).slice(0, free);
+  return { show, stale, keep: queue.filter((key) => !stale.includes(key) && !show.includes(key)) };
+}

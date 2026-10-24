@@ -1,55 +1,188 @@
+/* Every colour is a token here. Light is the default; dark applies when chosen, or when the OS asks and the viewer
+   has not chosen. The dark block appears twice because CSS cannot share one block between a selector and a query. */
 :root {
-  --bg: #0a1020;
-  --panel: #121a2e;
-  --line: #24304d;
-  --text: #eef2fb;
-  --muted: #9aa6c2;
-  --accent: #36c2ff;
-  --gold: #f5c542;
+  --bg: #f3f5f9;
+  --surface: #ffffff;
+  --surface-2: #e9edf4;
+  --text: #111827;
+  --text-muted: #4b5563;
+  --border: #d3d9e3;
+  --accent: #0a62b8;
+  --on-accent: #ffffff;
+  --home: #0f766e;
+  --away: #b03a0a;
+  --success: #126c34;
+  --warning: #974506;
+  --pitch: #2f7a4d;
+  --pitch-stripe: #2a7046;
+  --pitch-surround: #1e5636;
+  --pitch-line: #ffffffcc;
+  --ball: #ffffff;
+  --shadow: #0f172a26;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1120;
+    --surface: #131b2e;
+    --surface-2: #1c2640;
+    --text: #e7ecf5;
+    --text-muted: #a4b0c8;
+    --border: #2b3756;
+    --accent: #5bbcff;
+    --on-accent: #04121d;
+    --home: #2dd4bf;
+    --away: #fb923c;
+    --success: #4ade80;
+    --warning: #fbbf24;
+    --pitch: #1f5e3a;
+    --pitch-stripe: #1b5333;
+    --pitch-surround: #0e2a1b;
+    --pitch-line: #ffffffb3;
+    --ball: #ffffff;
+    --shadow: #00000080;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1120;
+  --surface: #131b2e;
+  --surface-2: #1c2640;
+  --text: #e7ecf5;
+  --text-muted: #a4b0c8;
+  --border: #2b3756;
+  --accent: #5bbcff;
+  --on-accent: #04121d;
+  --home: #2dd4bf;
+  --away: #fb923c;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --pitch: #1f5e3a;
+  --pitch-stripe: #1b5333;
+  --pitch-surround: #0e2a1b;
+  --pitch-line: #ffffffb3;
+  --ball: #ffffff;
+  --shadow: #00000080;
   color-scheme: dark;
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
+:root { font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
+h1, h2, h3, h4, p { margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.empty { color: var(--text-muted); font-size: 14px; }
+button, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-.app {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 16px;
-  height: 100vh; /* the frame and its overlays always fit the screen; the recap scrolls instead */
-  padding: 16px;
+.app { max-width: 1440px; margin: 0 auto; padding: 0 16px 24px; }
+
+/* Top bar: wordmark, personalisation and theme. Sticky from tablet width up; on a phone it would eat the screen. */
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin: 0 -16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+@media (min-width: 768px) { .topbar { position: sticky; top: 0; z-index: 10; } }
+.brand { display: flex; flex-direction: column; margin-right: auto; }
+.wordmark { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.wordmark span { color: var(--accent); }
+.tagline { font-size: 12px; color: var(--text-muted); }
+
+.controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.controls label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.controls select {
+  width: 136px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  font-size: 13px;
 }
 
-/* Match frame: no video, just a pitch with the scoreboard and lower-third overlays. */
-.frame {
-  position: relative;
-  min-height: 0;
+.segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; align-self: flex-end; }
+.segmented button {
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button[aria-checked="true"] { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+.segmented button:focus-visible { outline-offset: -3px; }
+
+/* Score strip. Always left-to-right, so "2–1" never flips. */
+.scoreboard {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto;
+  grid-template-areas: "status home score away clock";
+  align-items: center;
+  gap: 12px 16px;
+  margin: 16px 0;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
   border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  background: #0c2417; /* the stadium surround; the pitch itself is drawn in Pitch.jsx */
+  background: var(--surface);
+  font-weight: 700;
 }
-/* The pitch keeps its real 111:71 box (105 x 68 m plus room for the goals) at any width, always landscape. */
-.pitch-area {
-  position: absolute;
-  inset: 72px 14px 14px;
-  display: grid;
-  place-items: center;
-  container-type: size;
+.scoreboard.waiting { display: flex; color: var(--text-muted); font-weight: 500; }
+.connection { grid-area: status; display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+.connection::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: var(--warning); }
+.connection.live::before { background: var(--success); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+.club { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.club.home { grid-area: home; justify-content: flex-end; }
+.club.home .badge { order: 1; }
+.club.away { grid-area: away; }
+.badge {
+  padding: 4px 7px;
+  border: 2px solid var(--secondary);
+  border-radius: 6px;
+  background: var(--primary);
+  color: var(--secondary);
+  font-size: 13px;
+  letter-spacing: 0.04em;
 }
-.pitch {
-  position: relative;
-  width: min(100cqw, 100cqh * 111 / 71);
-  aspect-ratio: 111 / 71;
-  container-type: inline-size;
+.name { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.score {
+  grid-area: score;
+  display: flex;
+  gap: 8px;
+  padding: 4px 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 28px;
+  font-variant-numeric: tabular-nums;
 }
+.score span { color: var(--text-muted); }
+.clock { grid-area: clock; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.clock span { font-size: 20px; }
+.clock small { white-space: nowrap; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* Main area: pitch and tabs on the left, the live feed on the right. */
+.layout { display: grid; gap: 16px; }
+@media (min-width: 1024px) { .layout { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
+.main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* The feed column takes the left column's height and scrolls inside it, instead of stretching the page. */
+.feed-col { position: relative; min-height: 480px; }
+.feed-scroll { position: absolute; inset: 0; overflow-y: auto; padding-right: 4px; }
+.section-title { margin-bottom: 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+
+/* The pitch keeps its real 111:71 box (105 x 68 m plus room for the goals) at any width. */
+.pitch-card { position: relative; padding: 12px; border-radius: 12px; background: var(--pitch-surround); }
+.pitch { position: relative; width: 100%; aspect-ratio: 111 / 71; container-type: inline-size; }
 .pitch svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.pitch .stripe { fill: #14532f; }
-.pitch .stripe.dark { fill: #104528; }
-.pitch .lines { fill: none; stroke: rgba(255, 255, 255, 0.8); stroke-width: 0.22; }
-.pitch .lines .spot { fill: rgba(255, 255, 255, 0.85); stroke: none; }
-.pitch .lines .goal { fill: rgba(255, 255, 255, 0.12); }
+.pitch .stripe { fill: var(--pitch); }
+.pitch .stripe.dark { fill: var(--pitch-stripe); }
+.pitch .lines { fill: none; stroke: var(--pitch-line); stroke-width: 0.22; }
+.pitch .lines .spot { fill: var(--pitch-line); stroke: none; }
+.pitch .lines .goal { fill: color-mix(in srgb, var(--pitch-line) 15%, transparent); }
 
 /* Players ease to their spots and the ball glides between event coordinates, so nothing teleports. */
 .player, .ball { position: absolute; transform: translate(-50%, -50%); }
@@ -64,141 +197,178 @@ body { margin: 0; background: var(--bg); color: var(--text); }
   color: var(--secondary);
   font-size: max(8px, 1.2cqw);
   font-weight: 700;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 6px var(--shadow);
   transition: left 0.4s ease-out, top 0.4s ease-out;
 }
-.player.on-ball { z-index: 1; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.7); }
+.player.on-ball { z-index: 1; box-shadow: 0 0 0 3px var(--pitch-line); }
 .ball {
   width: max(6px, 1cqw);
   height: max(6px, 1cqw);
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+  background: var(--ball);
+  box-shadow: 0 0 6px var(--ball);
   z-index: 2;
   transition: left 0.6s ease-in-out, top 0.6s ease-in-out;
 }
 
-.connection {
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  font-size: 14px;
-  font-weight: 600;
-  background: var(--panel);
-}
-.connection::before { content: "●"; margin-right: 6px; }
-.connection.live::before { color: #3ddc84; }
-.connection.connecting::before, .connection.reconnecting::before { color: var(--gold); }
-
-.scoreboard {
-  position: absolute;
-  top: 14px;
-  left: 14px;
-  max-width: calc(100% - 28px);
-  z-index: 2;
-  display: flex;
-  align-items: stretch;
-  border-radius: 8px;
-  overflow: hidden;
-  background: rgba(8, 12, 24, 0.92);
-  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.4);
+/* Chips name the moment type; goals and big chances stand out. */
+.chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent);
+  font-size: 11px;
   font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
-.scoreboard.waiting { padding: 10px 14px; color: var(--muted); font-weight: 500; }
-.club { display: flex; align-items: center; gap: 8px; padding: 0 12px; }
-.badge {
-  padding: 4px 6px;
-  border-radius: 4px;
-  font-size: 13px;
-  background: var(--primary, #444);
-  color: var(--secondary, #fff);
-}
-.club { min-width: 0; }
-.name { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.score { display: flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 26px; background: #1c2742; }
-.score span { color: var(--muted); }
-.clock {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 14px;
-  background: var(--accent);
-  color: #04121d;
-  font-variant-numeric: tabular-nums;
-  font-size: 18px;
-}
-.clock small { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap; }
+.chip.goal, .chip.full_time { background: color-mix(in srgb, var(--warning) 16%, var(--surface)); color: var(--warning); }
+.chip.big_chance { background: color-mix(in srgb, var(--away) 14%, var(--surface)); color: var(--away); }
+.minute { color: var(--text-muted); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
-.overlays {
-  position: absolute;
-  left: 24px;
-  right: 24px;
-  bottom: 24px;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+/* Lower-third: the highest-priority overlay over the pitch for its duration_ms. */
+.lower-third { position: absolute; left: 28px; right: 28px; bottom: 26px; z-index: 3; }
 .overlay {
-  max-width: 720px;
+  max-width: 640px;
   padding: 12px 16px;
-  border-left: 6px solid var(--accent);
-  border-radius: 6px;
-  background: rgba(8, 12, 24, 0.93);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  border-left: 5px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 95%, transparent);
+  box-shadow: 0 8px 28px var(--shadow);
   animation: slide-in 0.35s ease-out;
 }
-.overlay.goal, .overlay.p5 { border-left-color: var(--gold); }
-.overlay header { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
-.overlay .tag { color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; }
-.overlay.goal .tag { color: var(--gold); }
-.overlay h2 { margin: 4px 0 6px; font-size: 24px; line-height: 1.2; }
-.overlay p { margin: 0; font-size: 16px; line-height: 1.4; }
-.overlay .why { margin-top: 4px; color: var(--muted); }
+.overlay.goal, .overlay.p5 { border-left-color: var(--warning); }
+.overlay header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.overlay h2 { margin-bottom: 4px; font-size: 22px; line-height: 1.25; }
+.overlay p { font-size: 15px; line-height: 1.45; }
+.overlay .why { margin-top: 4px; color: var(--text-muted); }
 @keyframes slide-in { from { opacity: 0; transform: translateY(12px); } }
 
-/* Side column: personalisation and recap. */
-.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; min-height: 0; }
-.panel, .recap { padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); }
-h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
-.personas { display: flex; gap: 6px; margin-bottom: 12px; }
-.personas button {
-  flex: 1;
-  padding: 8px 4px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
+/* Feed cards, newest first. */
+.feed { display: flex; flex-direction: column; gap: 10px; }
+.card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 10px;
+  background: var(--surface);
+  animation: slide-in 0.35s ease-out;
+}
+.card.goal { border-left-color: var(--warning); }
+.card header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.card h3 { margin-bottom: 4px; font-size: 16px; line-height: 1.3; }
+.card p { font-size: 14px; line-height: 1.45; }
+.card .why { margin-top: 4px; color: var(--text-muted); }
+
+/* "How we know": who wrote the card, and the facts it cites. */
+.how { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.source {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.source.model { border-color: transparent; background: color-mix(in srgb, var(--success) 14%, var(--surface)); color: var(--success); }
+.how button {
+  margin-left: auto;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
-.personas button.on { background: var(--accent); border-color: var(--accent); color: #04121d; font-weight: 700; }
-.panel label { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 13px; color: var(--muted); }
-.panel select {
-  padding: 7px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
+.how button::after { content: " ▾"; }
+.how button[aria-expanded="true"]::after { content: " ▴"; }
+.evidence { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
+.evidence div { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.evidence dt { color: var(--text-muted); }
+.evidence dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tabpanel .evidence { background: var(--surface); }
+
+/* Tabs under the pitch. */
+.tabs { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.tablist { display: flex; gap: 4px; padding: 6px 6px 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.tablist button {
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
   font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
 }
-button:focus-visible, select:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.tablist button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--text); }
+.tabpanel { padding: 14px 16px 16px; }
+.tabpanel .card { background: var(--surface-2); border-color: var(--border); }
 
-.recap { flex: 1; min-height: 120px; overflow: auto; }
+.timeline { margin: 0; padding: 0; list-style: none; }
+.timeline li { display: flex; align-items: baseline; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.timeline li:first-child { border-top: 0; }
+.timeline .minute { min-width: 44px; }
+
+.stats { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.stats th, .stats td { padding: 8px 4px; font-size: 14px; }
+.stats thead th { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.stats tbody tr + tr { border-top: 1px solid var(--border); }
+.stats .home { width: 72px; text-align: left; color: var(--home); font-weight: 700; }
+.stats .away { width: 72px; text-align: right; color: var(--away); font-weight: 700; }
+.stats tbody th { font-weight: 500; text-align: center; }
+.stats .bar {
+  display: block;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: 3px;
+  background: linear-gradient(to right, var(--home) var(--share), var(--away) var(--share));
+}
+
+.lineups { display: grid; gap: 20px; }
+@media (min-width: 600px) { .lineups { grid-template-columns: 1fr 1fr; } }
+.lineups h3 { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.lineups .meta { margin: 4px 0 10px; font-size: 13px; color: var(--text-muted); }
+.lineups h4 { margin: 10px 0 4px; font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.lineups ol { margin: 0; padding: 0; list-style: none; }
+.lineups li { display: flex; gap: 10px; padding: 4px 0; font-size: 14px; }
+.lineups .number { min-width: 22px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+.lineups .position { margin-left: auto; color: var(--text-muted); font-size: 12px; font-weight: 600; }
+
 .recap ol { margin: 0; padding: 0; list-style: none; }
-.recap li { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
-.recap li.goal strong { color: var(--gold); }
-.recap .minute { min-width: 44px; color: var(--accent); font-variant-numeric: tabular-nums; font-size: 13px; }
+.recap li { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+.recap li:first-child { border-top: 0; }
+.recap li.goal strong { color: var(--warning); }
+.recap .minute { min-width: 44px; }
+.recap div { flex: 1; }
 .recap strong { font-size: 14px; }
-.recap p { margin: 2px 0 0; font-size: 13px; color: var(--muted); }
-.recap .empty { color: var(--muted); font-size: 14px; }
+.recap p { margin-top: 2px; font-size: 13px; color: var(--text-muted); }
 
-/* Narrow screens stack the frame above the panel; this must come after the base rules to win. */
-@media (max-width: 1000px) { .app { grid-template-columns: 1fr; height: auto; } .frame { min-height: 560px; } }
-@media (max-width: 700px) { .name { display: none; } } /* the club badges alone keep the clock on screen */
+/* Phones: one column, short club codes only, and the lower-third sits under the pitch rather than covering it. */
+@media (max-width: 767px) {
+  .brand { margin-right: 0; }
+  .topbar { justify-content: space-between; }
+  .controls { display: grid; grid-template-columns: 1fr 1fr; width: 100%; order: 1; }
+  .controls select { width: 100%; }
+  .scoreboard {
+    grid-template-columns: 1fr auto 1fr;
+    grid-template-areas: "home score away" "status . clock";
+    padding: 10px 12px;
+  }
+  .name { display: none; }
+  .clock { flex-direction: row; align-items: baseline; gap: 8px; }
+  .clock span { font-size: 16px; }
+  .lower-third { position: static; margin-top: 12px; }
+  .overlay { max-width: none; }
+  .overlay h2 { font-size: 18px; }
+}
 
-/* Arabic overlay and recap text: right to left with a font stack that shapes Arabic well. Everything else stays LTR. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
+/* Arabic overlay and recap text: a font stack that shapes Arabic well. Direction is set on those blocks alone. */
 [lang="ar"] { font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif; }
-[lang="ar"] .overlay h2, [lang="ar"] .overlay p, .recap ol[lang="ar"] { line-height: 1.5; }
+[lang="ar"] h2, [lang="ar"] h3, [lang="ar"] p, [lang="ar"] strong { line-height: 1.55; }

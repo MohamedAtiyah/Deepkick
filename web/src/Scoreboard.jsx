@@ -1,27 +1,32 @@
 import league from "../../data/league.json";
 import { useSmoothClock } from "./live.js";
 
-const COLOURS = Object.fromEntries(league.clubs.map((club) => [club.id, club.colours]));
+const CLUBS = Object.fromEntries(league.clubs.map((club) => [club.id, club]));
 const PERIOD = { not_started: "Pre-match", kickoff: "1st half", half_time: "Half-time", second_half: "2nd half",
   full_time: "Full-time" };
+const STATUS_LABEL = { live: "Live", connecting: "Connecting…", reconnecting: "Reconnecting…" };
 
-export default function Scoreboard({ state }) {
+/** The score strip: both clubs in their colours, score, smooth match clock, period and the feed's connection. */
+export default function Scoreboard({ state, status }) {
   const clock = useSmoothClock(state);
-  if (!state?.match_id) return <div className="scoreboard waiting">Waiting for kick-off…</div>;
+  const connection = <div className={`connection ${status}`} role="status">{STATUS_LABEL[status]}</div>;
+  if (!state?.match_id) return <div className="scoreboard waiting">{connection}<span>Waiting for kick-off…</span></div>;
+
   const [home, away] = Object.keys(state.score);
-  const club = (id) => (
-    <div className="club" style={{ "--primary": COLOURS[id]?.primary, "--secondary": COLOURS[id]?.secondary }}>
-      <span className="badge">{id}</span>
+  const club = (id, side) => (
+    <div className={`club ${side}`} style={{ "--primary": CLUBS[id]?.colours.primary, "--secondary": CLUBS[id]?.colours.secondary }}>
+      <span className="badge">{CLUBS[id]?.short_name ?? id}</span>
       <span className="name">{state.teams[id]?.name ?? id}</span>
     </div>
   );
   return (
     <div className="scoreboard">
-      {club(home)}
-      <div className="score">
-        {state.score[home]}<span>–</span>{state.score[away]}
+      {connection}
+      {club(home, "home")}
+      <div className="score" aria-label={`${state.score[home]} to ${state.score[away]}`}>
+        {state.score[home]}<span aria-hidden="true">–</span>{state.score[away]}
       </div>
-      {club(away)}
+      {club(away, "away")}
       <div className="clock">
         <span>{clock}</span>
         <small>{PERIOD[state.status] ?? `Half ${state.half}`}</small>

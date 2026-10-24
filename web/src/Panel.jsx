@@ -3,30 +3,34 @@ import league from "../../data/league.json";
 const PERSONAS = [["analyst", "Analyst"], ["casual", "Casual fan"], ["player", "Player focus"]];
 const LANGUAGES = [["en", "English"], ["ar", "العربية"]];
 
+/** The personalisation controls as compact selects: persona, language, favourite club and player. */
 export default function Panel({ profile, onChange }) {
   const set = (field) => (event) => onChange({ ...profile, [field]: event.target.value });
   return (
-    <section className="panel">
-      <h3>Your broadcast</h3>
-      <div className="personas" role="radiogroup" aria-label="Persona">
-        {PERSONAS.map(([id, label]) => (
-          <button key={id} role="radio" aria-checked={profile.persona === id}
-                  className={profile.persona === id ? "on" : ""} onClick={() => onChange({ ...profile, persona: id })}>
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className="controls">
       <label>
-        Favourite club
+        <span>Persona</span>
+        <select value={profile.persona} onChange={set("persona")}>
+          {PERSONAS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </label>
+      <label>
+        <span>Language</span>
+        <select value={profile.lang} onChange={set("lang")}>
+          {LANGUAGES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+        </select>
+      </label>
+      <label>
+        <span>Club</span>
         <select value={profile.club} onChange={set("club")}>
-          <option value="">None</option>
+          <option value="">Any</option>
           {league.clubs.map((club) => <option key={club.id} value={club.id}>{club.name}</option>)}
         </select>
       </label>
       <label>
-        Favourite player
+        <span>Player</span>
         <select value={profile.player} onChange={set("player")}>
-          <option value="">None</option>
+          <option value="">Any</option>
           {league.clubs.map((club) => (
             <optgroup key={club.id} label={club.name}>
               {[...club.starters, ...club.bench].map((p) => (
@@ -36,12 +40,6 @@ export default function Panel({ profile, onChange }) {
           ))}
         </select>
       </label>
-      <label>
-        Language
-        <select value={profile.lang} onChange={set("lang")}>
-          {LANGUAGES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-        </select>
-      </label>
-    </section>
+    </div>
   );
 }
