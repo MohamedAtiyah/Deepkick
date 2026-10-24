@@ -139,7 +139,6 @@ button, select { font: inherit; color: inherit; }
 .summary div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
 .summary dt { color: var(--text-muted); }
 .summary dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
-.summary small { color: var(--text-muted); font-weight: 500; }
 
 .recap-item { padding: 10px 0; border-top: 1px solid var(--border); }
 .recap-item:first-of-type { border-top: 0; }

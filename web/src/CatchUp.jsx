@@ -44,9 +44,12 @@ export default function CatchUp({ profile }) {
             <dl className="summary">
               <div>
                 <dt>Score</dt>
+                <dd dir="ltr">{score(data.score.now)}</dd>
+              </div>
+              <div>
+                <dt>Goals since {data.from}</dt>
                 <dd dir="ltr">
-                  {data.score.goals ? `${score(data.score.then)} → ${score(data.score.now)}` : score(data.score.now)}
-                  <small> ({data.score.goals || "no"} goal{data.score.goals === 1 ? "" : "s"})</small>
+                  {data.score.goals ? `${data.score.goals}, from ${score(data.score.then)}` : "None"}
                 </dd>
               </div>
               {leader && (
