@@ -11,7 +11,7 @@
   --on-accent: #ffffff;
   --home: #0f766e;
   --away: #b03a0a;
-  --success: #15803d;
+  --success: #126c34;
   --warning: #974506;
   --pitch: #2f7a4d;
   --pitch-stripe: #2a7046;
@@ -260,6 +260,35 @@ button, select { font: inherit; color: inherit; }
 .card h3 { margin-bottom: 4px; font-size: 16px; line-height: 1.3; }
 .card p { font-size: 14px; line-height: 1.45; }
 .card .why { margin-top: 4px; color: var(--text-muted); }
+
+/* "How we know": who wrote the card, and the facts it cites. */
+.how { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.source {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.source.model { border-color: transparent; background: color-mix(in srgb, var(--success) 14%, var(--surface)); color: var(--success); }
+.how button {
+  margin-left: auto;
+  padding: 2px 4px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.how button::after { content: " ▾"; }
+.how button[aria-expanded="true"]::after { content: " ▴"; }
+.evidence { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
+.evidence div { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
+.evidence dt { color: var(--text-muted); }
+.evidence dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tabpanel .evidence { background: var(--surface); }
 
 /* Tabs under the pitch. */
 .tabs { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }

@@ -250,7 +250,7 @@ curl localhost:8000/healthz
     - Markers that land within 3 m of each other are nudged apart, but the player on the ball never moves.
   - **Movement:** players ease to their spots over 400 ms and the ball glides over 600 ms, so nothing teleports.
 - **Lower-third:** one overlay at a time on the pitch, showing its headline, detail and why for its own `duration_ms`. It never appears before the match clock reaches its `show_at_ms`. When several are due, the highest `priority` goes first and the rest queue. An overlay that has waited more than one match minute (counted from its `show_at_ms`, or from when it reached the browser if that was later) is skipped on the pitch, since the feed already has it; goals are never skipped. Without this, at 30x replay each 6–8 second lower-third holds the screen for 3–4 match minutes and the queue falls about 8 minutes behind; with it, lower-thirds trail the clock by 1–3 minutes, mostly the pipeline's own delay. The queue also keeps only the newest 4, so a late viewer's backlog doesn't play for minutes.
-- **Live feed:** every overlay whose moment has come, as cards with a type chip, match clock, headline, detail and why, newest first. It is an `aria-live="polite"` region, so screen readers announce new moments. The lower-third is not, so nothing is announced twice.
+- **Live feed:** every overlay whose moment has come, as cards with a type chip, match clock, headline, detail and why, newest first. Each card shows who wrote it ("AI-explained" or "Stats template") and a collapsible **How we know** list of the facts it cites (see [Explainability](#8-explainability)). It is an `aria-live="polite"` region, so screen readers announce new moments. The lower-third is not, so nothing is announced twice.
 - **Tabs:** Moments (the feed on narrow screens; a one-line timeline beside the full feed on desktop), Stats (head-to-head team stats from `/state`: possession, shots, shots on target, expected goals, passes, pass accuracy, tackles and pressures won, top shot speed and momentum), Lineups (formation, manager, starting eleven and bench from `data/league.json`) and Recap (`/recap` for the current persona, newest first, refreshed every 5 seconds). The tabs follow the WAI-ARIA pattern: arrow keys, Home and End move between them.
 - **Personalisation:** persona (analyst, casual fan, player focus), language, favourite club and favourite player (the squads from `data/league.json`), as compact selects in the top bar.
   - **Language:** English or Arabic. With Arabic, only the overlay, feed and recap text blocks switch to right-to-left, with a font stack that shapes Arabic well. Scores are isolated left-to-right, because after an Arabic word the browser would otherwise show "1-0" as "0-1". The score strip, pitch, clocks, chips and controls stay left-to-right.
@@ -294,7 +294,8 @@ In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/r
   - **Analyst:** a precise headline with the moment's key number ("Rafe Ironsby scores: 0.252 xG from 9.2 m"). Its detail lists the key numbers in plain words ("The key numbers are …"), with the score (both sides) and the player's goal tally first, and fact keys without wording are left out rather than printed raw. Its why is the Narrative Agent's facts-only template line.
   - **Player:** built around the player's name, or the club's for half-time, full-time and momentum swings ("Rafe Ironsby's first goal of the match"), with its own player-centred detail and why.
   - **No repeats:** for every moment type the three headlines differ, and no persona's detail or why repeats another's, so switching persona always changes what's on screen.
-- **Viewer selection (plain Python, no model):** `select_overlay(moment, versions, profile)` picks the profile's persona and returns an overlay that follows the Overlay contract. It is checked by `validate_overlay` in [`deepkick/contracts.py`](deepkick/contracts.py), which checks fields, types, `persona` and `lang`.
+- **Viewer selection (plain Python, no model):** `select_overlay(moment, versions, profile)` picks the profile's persona and returns an overlay that follows the Overlay contract. It is checked by `validate_overlay` in [`deepkick/contracts.py`](deepkick/contracts.py), which checks fields, types, `persona`, `lang`, `source` and `evidence`.
+  - **Evidence and source:** the payload carries `evidence`, a list of `{label, value}` for the facts the text cites, and `source`, `model` or `template`. See [Explainability](#8-explainability).
   - **Priority:** 1–5 by moment type (goal 5, full-time 4, big chance, momentum swing, pressure spell and half-time 3, high press win and speed, sprint or pass milestones 2, distance milestones 1). It goes up by 1 when the moment involves the viewer's favourite club or player, capped at 5; a half-time or full-time moment involves both clubs.
   - **Other club:** a moment of priority 2 or lower for the viewer's other club is shown as priority 1. Goals keep priority 5 for every profile and are never dropped.
   - **Timing:** `show_at_ms` comes from the match clock, and `duration_ms` is 8000 for goals and 6000 for everything else.
@@ -304,6 +305,7 @@ In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/r
     - Every number is wrapped too. Left alone, the live Translator wrote small counts as Arabic words ("1 shot" became "تسديدة واحدة"), which lost the digit; on seed 42 that sent most persona versions back to English, and with numbers protected none fell back.
     - Any Arabic-Indic digits that come back are turned into Western digits, and a space the Translator drops beside a protected name is put back.
   - **Numbers are checked:** every number in the English text must still be in the translation, none lost or altered. If one is, that persona's version keeps its English text. This is the same guarantee as the narrative's number check.
+  - **Evidence labels:** the "How we know" labels go in the same batch and are translated with their version; evidence values are never sent or changed.
   - **One call per moment:** all of a moment's strings go to the Translator in a single call, and results are cached by (text, language), so strings that recur across personas and moments are never sent twice.
   - **Failure rules as elsewhere:** a 10-second timeout and one retry. A 429 waits 2 s, 4 s, then 8 s (or Retry-After, capped at 30 s) without using up an attempt, like a model 429. After a timeout, an HTTP error or a malformed reply, every version keeps its English text with `fallback: true`, so an overlay always ships. Each handoff logs `stage=translate event_id=… duration_ms=… fallback=yes|no`.
   - **English:** passes through with no call.
@@ -324,4 +326,17 @@ In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/r
 - Arabic-Indic digits coming back as Western digits;
 - timeouts and malformed replies falling back to English with the flag set.
 
-[`tests/test_api.py`](tests/test_api.py) checks Arabic overlays over `/ws?lang=ar` and `/recap?lang=ar`.
+[`tests/test_api.py`](tests/test_api.py) checks Arabic overlays over `/ws?lang=ar` and `/recap?lang=ar`, with translated evidence labels and untouched values.
+
+## 8. Explainability
+
+Every overlay says how it knows what it says. Its payload carries:
+
+- **`source`:** `model` if the Foundry model wrote the text (it passed every check), `template` if a stats template did. The broadcast view shows this as an "AI-explained" or "Stats template" badge on each card.
+- **`evidence`:** the moment facts the text cites, as `{label, value}`, behind a **How we know** button (`aria-expanded`) on each card.
+  - **Model text:** the facts the Narrative Agent cited, after `check_output` confirmed each `stat` is a key of the moment's facts holding that value. The persona rewrite is number-checked against the moment facts as well.
+  - **Template text:** exactly the facts that template read. The templates read the facts through a small recording dict, so the list can't drift from the code that writes the sentence.
+  - **Values** are copied from the moment facts, never parsed from model text. A test checks every evidence value against its fact, for every moment and persona, from both sources.
+  - **Labels** come from one dict, `FACT_LABELS` in [`deepkick/agents/persona.py`](deepkick/agents/persona.py), keyed by dotted fact key with `{club}` for a club code (`momentum.CAL.value` becomes "Calderbrook momentum"). A test checks that every fact key in the seed-42 replay has a readable label. For Arabic, labels are translated in the moment's one Translator batch and cached; values are untouched.
+
+Together with the number checks (a narrative may only cite numbers present in the match state passed to the model), a viewer can see which facts a caption rests on and whether a model or a template wrote it.

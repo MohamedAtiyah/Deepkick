@@ -86,7 +86,7 @@ _OUTCOME = {"goal": "scored", "saved": "saved", "blocked": "blocked", "off_targe
 def _leaves(value: Any, path: str = "") -> Iterator[tuple[str, float]]:
     """Yield (dotted path, number) for every numeric leaf of a JSON-like value."""
     if isinstance(value, dict):
-        for key, item in value.items():
+        for key, item in dict.items(value):  # dict.items: walking a persona._Reads must not count as reading it
             yield from _leaves(item, f"{path}.{key}" if path else str(key))
     elif isinstance(value, list):
         for i, item in enumerate(value):

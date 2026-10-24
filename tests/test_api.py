@@ -177,5 +177,9 @@ def test_arabic_overlays_over_ws_and_recap_with_a_mocked_translator():
         validate_overlay(a)
         assert a["lang"] == "ar" and a["payload"]["headline"] == ARABIC + e["payload"]["headline"]
         assert a["payload"]["player"] == e["payload"]["player"]  # names stay as they are
+        # Evidence labels are translated with the text; values stay exactly the English (fact) values.
+        assert [x["label"] for x in a["payload"]["evidence"]] == [ARABIC + x["label"] for x in e["payload"]["evidence"]]
+        assert [x["value"] for x in a["payload"]["evidence"]] == [x["value"] for x in e["payload"]["evidence"]]
+        assert a["payload"]["source"] == e["payload"]["source"] == "template"  # the model client always fails here
     assert recap[0] == ar[-1]
     assert len(requests) <= TOTAL  # at most one batched call per moment, fewer once strings repeat

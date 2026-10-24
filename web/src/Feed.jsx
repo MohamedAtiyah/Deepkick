@@ -1,5 +1,29 @@
+import { useId, useState } from "react";
 import { clockMs } from "./live.js";
 import { LABEL, Text } from "./OverlayStack.jsx";
+
+const SOURCE = { model: "AI-explained", template: "Stats template" };
+
+/** Who wrote the card, and a collapsible list of the match facts it cites (label: value). */
+function HowWeKnow({ payload, lang, dir }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <>
+      <div className="how">
+        <span className={`source ${payload.source}`}>{SOURCE[payload.source]}</span>
+        {payload.evidence.length > 0 && (
+          <button aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>How we know</button>
+        )}
+      </div>
+      <dl id={id} className="evidence" hidden={!open} lang={lang} dir={dir}>
+        {payload.evidence.map((e) => (
+          <div key={e.label}><dt>{e.label}</dt><dd><bdi dir="ltr">{e.value}</bdi></dd></div>
+        ))}
+      </dl>
+    </>
+  );
+}
 
 /** Every overlay whose moment has come, newest first: full cards, or one line each when `compact`. */
 export default function Feed({ overlays, matchClock, lang, compact = false }) {
@@ -30,6 +54,7 @@ export default function Feed({ overlays, matchClock, lang, compact = false }) {
               <p><Text>{o.payload.detail}</Text></p>
               <p className="why"><Text>{o.payload.why}</Text></p>
             </div>
+            <HowWeKnow payload={o.payload} lang={lang} dir={dir} />
           </article>
         ))
       )}
