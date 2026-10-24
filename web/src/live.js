@@ -35,8 +35,6 @@ export function useOverlaySocket(profile, onOverlay) {
 
   useEffect(() => {
     const params = new URLSearchParams({ persona: profile.persona, lang: profile.lang });
-    if (profile.club) params.set("club", profile.club);
-    if (profile.player) params.set("player", profile.player);
     const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?${params}`;
     let socket, retry, attempt = 0, stopped = false;
 
@@ -61,7 +59,7 @@ export function useOverlaySocket(profile, onOverlay) {
       clearTimeout(retry);
       socket.close();
     };
-  }, [profile.persona, profile.club, profile.player, profile.lang]);
+  }, [profile.persona, profile.lang]);
 
   return status;
 }
