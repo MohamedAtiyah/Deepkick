@@ -65,12 +65,15 @@ function Markings() {
   );
 }
 
-export default function Pitch({ state }) {
+export default function Pitch({ state, highlight }) {
   const ids = state?.score ? Object.keys(state.score) : league.clubs.map((club) => club.id);
   const clubs = ids.map((id) => CLUBS[id]).filter(Boolean);
   const ball = state?.ball;
   const players = layout(clubs, ids[0], ball);
   const ballXY = ball && toScreen(ball.team, ids[0], ball.x, ball.y);
+  // The moment picked on the timeline, at its event's coordinates (in the acting team's frame, like the ball).
+  const at = highlight?.coordinates;
+  const spot = at && toScreen(highlight.team, ids[0], at.x, at.y);
 
   return (
     <div className="pitch-area">
@@ -83,6 +86,7 @@ export default function Pitch({ state }) {
           </span>
         ))}
         {ballXY && <span className="ball" style={pct(...ballXY)} />}
+        {spot && <span className="spot-highlight" style={pct(...spot)} />}
       </div>
     </div>
   );

@@ -413,3 +413,72 @@ button, select { font: inherit; color: inherit; }
 /* Arabic overlay and recap text: a font stack that shapes Arabic well. Direction is set on those blocks alone. */
 [lang="ar"] { font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif; }
 [lang="ar"] h2, [lang="ar"] h3, [lang="ar"] p, [lang="ar"] strong { line-height: 1.55; }
+
+/* Match timeline: momentum bars in the club colours (secondary outline, so dark primaries show on dark themes),
+   moment markers, the half-time line and the clock. */
+.timeline-card { margin: -4px 0 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); }
+.timeline-plot { position: relative; height: 120px; }
+.timeline-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.timeline-plot .bar { fill: var(--primary); stroke: var(--secondary); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.timeline-plot .centre { stroke: var(--text-muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.timeline-plot .half { stroke: var(--border); stroke-width: 2; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.timeline-plot .cursor { stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.timeline-plot .side, .timeline-plot .axis {
+  position: absolute;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.timeline-plot .side { left: 0; border: 1px solid var(--secondary); background: var(--primary); color: var(--secondary); }
+.timeline-plot .side.home { top: 0; }
+.timeline-plot .side.away { bottom: 0; }
+.timeline-plot .axis { bottom: -2px; transform: translateX(-50%); color: var(--text-muted); background: var(--surface); }
+.marker {
+  position: absolute;
+  top: calc(50% + var(--offset, 0px));
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 2px solid var(--secondary, var(--surface));
+  border-radius: 50%;
+  background: var(--primary, var(--text-muted));
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 1;
+}
+.marker.neutral { border-color: var(--surface); background: var(--text-muted); }
+.marker.goal { width: 20px; height: 20px; border-width: 3px; z-index: 2; }
+.marker:hover, .marker:focus-visible, .marker.on { box-shadow: 0 0 0 3px var(--accent); z-index: 3; }
+.timeline-plot .tip {
+  position: absolute;
+  top: -8px;
+  max-width: min(320px, 70vw);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px var(--shadow);
+  font-size: 13px;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  z-index: 5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card.selected, .timeline li.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+.spot-highlight {
+  position: absolute;
+  width: max(22px, 4cqw);
+  height: max(22px, 4cqw);
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  z-index: 3;
+  pointer-events: none;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@media (max-width: 767px) { .timeline-plot { height: 96px; } }

@@ -9,6 +9,7 @@ import Feed from "./Feed.jsx";
 import Panel from "./Panel.jsx";
 import Tabs from "./Tabs.jsx";
 import CatchUp from "./CatchUp.jsx";
+import Timeline from "./Timeline.jsx";
 
 const WIDE = "(min-width: 1024px)"; // the feed gets its own column; below this it lives in the Moments tab
 const wide = () => matchMedia(WIDE).matches;
@@ -43,7 +44,10 @@ export default function App() {
   // Off by default: browsers block audio until the viewer clicks, and this click is that permission.
   const [commentary, setCommentary] = useState(false);
   useCommentary(overlays, state?.match_clock, commentary);
-  const feed = <Feed overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} />;
+  const [selected, setSelected] = useState(null); // a moment picked on the timeline: { key, coordinates, team }
+  const feed = (
+    <Feed overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} selected={selected?.key} />
+  );
 
   return (
     <div className="app">
@@ -60,13 +64,14 @@ export default function App() {
         <ThemeToggle />
       </header>
       <Scoreboard state={state} status={status} />
+      <Timeline state={state} profile={profile} overlays={overlays} selected={selected} onSelect={setSelected} />
       <main className="layout">
         <div className="main-col">
           <section className="pitch-card" aria-label="Pitch">
-            <Pitch state={state} />
+            <Pitch state={state} highlight={selected} />
             <OverlayStack overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} />
           </section>
-          <Tabs state={state} profile={profile} overlays={overlays} feed={isWide ? null : feed} />
+          <Tabs state={state} profile={profile} overlays={overlays} feed={isWide ? null : feed} selected={selected} />
         </div>
         {isWide && (
           <aside className="feed-col" aria-label="Live feed">
