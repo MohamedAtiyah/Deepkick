@@ -130,6 +130,24 @@ class Orchestrator:
         headlines = {m["moment_id"]: select_overlay(m, v, profile)["payload"]["headline"] for m, v in self._released}
         return catch_up(self._timeline, headlines, at or self.stats.snapshot()["match_clock"], minutes)
 
+    def timeline(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """The momentum series and released moments up to the current clock, with overlay ids for `profile`."""
+        clock = self.stats.match_clock
+        now = clock_seconds({"match_clock": clock})
+        coordinates = {e["moment"]["moment_id"]: e["coordinates"] for e in self._timeline}
+        moments = []
+        for moment, versions in list(self._released):
+            if clock_seconds(moment) > now:
+                continue
+            overlay = select_overlay(moment, versions, self.profile | profile)
+            moments.append({"overlay_id": overlay["overlay_id"], "minute": clock_seconds(moment) // 60 + 1,
+                            "match_clock": moment["match_clock"], "type": moment["type"],
+                            "priority": overlay["priority"], "team": moment["team"],
+                            "coordinates": coordinates.get(moment["moment_id"])})
+        return {"clock": clock, "minutes": [dict(entry) for entry in list(self.stats.momentum_series)
+                                            if entry["minute"] <= now // 60],
+                "moments": moments}
+
     def released_overlay(self, overlay_id: str, persona: str, lang: str) -> dict[str, Any] | None:
         """The released overlay with this id for (persona, lang), or None if no released moment has that id."""
         for moment, versions in self._released:
@@ -158,8 +176,11 @@ class Orchestrator:
         for moment in self.detector.detect(event, snapshot):
             self.counts["moments"] += 1
             self._held.append((moment, snapshot))
+            # Coordinates only for a player's own action: they are in that team's frame, and match-wide moments
+            # (half-time, momentum swings) have no single place on the pitch.
             self._timeline.append({"moment": moment, "score": dict(snapshot["score"]),
-                                   "momentum": {t: s["momentum"]["value"] for t, s in snapshot["teams"].items()}})
+                                   "momentum": {t: s["momentum"]["value"] for t, s in snapshot["teams"].items()},
+                                   "coordinates": event["coordinates"] if moment["player"] else None})
 
     def close_minute(self) -> None:
         """Apply the per-minute cap to the held moments and queue the kept ones for model work."""

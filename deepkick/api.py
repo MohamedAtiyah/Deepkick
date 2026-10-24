@@ -1,4 +1,4 @@
-"""Overlay API: the orchestrator's shared match state over FastAPI (/state, /recap, /catchup, /ws, /speech, /healthz)."""
+"""Overlay API: the orchestrator's shared match state over FastAPI: REST endpoints plus the /ws overlay socket."""
 
 from __future__ import annotations
 
@@ -50,6 +50,13 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
     def state() -> dict[str, Any]:
         """The current match state: score, clock, team and player stats."""
         return app.state.orchestrator.snapshot()
+
+    @app.get("/timeline")
+    def timeline(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
+                 club: str | None = None, player: str | None = None) -> dict[str, Any]:
+        """Per-minute momentum (home minus away) and the released moments, up to the current clock only."""
+        return app.state.orchestrator.timeline({"persona": persona, "lang": lang, "favourite_club": club,
+                                                "favourite_player": player})
 
     @app.get("/recap")
     def recap(persona: Literal["analyst", "casual", "player"] | None = None,
