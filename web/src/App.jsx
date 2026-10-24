@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore } from "react";
 import { momentKey, useMatchState, useOverlaySocket } from "./live.js";
 import { THEMES, useTheme } from "./theme.js";
+import { useCommentary } from "./commentary.js";
 import Scoreboard from "./Scoreboard.jsx";
 import Pitch from "./Pitch.jsx";
 import OverlayStack from "./OverlayStack.jsx";
@@ -38,6 +39,9 @@ export default function App() {
     setOverlays((previous) => new Map(previous).set(momentKey(overlay), overlay)),
   );
   const isWide = useSyncExternalStore(onWideChange, wide);
+  // Off by default: browsers block audio until the viewer clicks, and this click is that permission.
+  const [commentary, setCommentary] = useState(false);
+  useCommentary(overlays, state?.match_clock, commentary);
   const feed = <Feed overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} />;
 
   return (
@@ -48,6 +52,9 @@ export default function App() {
           <span className="tagline">Every moment explained, in your words.</span>
         </div>
         <Panel profile={profile} onChange={setProfile} />
+        <button className="toggle" aria-pressed={commentary} onClick={() => setCommentary(!commentary)}>
+          Commentary {commentary ? "on" : "off"}
+        </button>
         <ThemeToggle />
       </header>
       <Scoreboard state={state} status={status} />

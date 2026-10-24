@@ -1,4 +1,4 @@
-"""Overlay API: serves the orchestrator's shared match state over FastAPI (/state, /recap, /ws, /healthz)."""
+"""Overlay API: serves the orchestrator's shared match state over FastAPI (/state, /recap, /ws, /speech, /healthz)."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 
 from deepkick.agents.persona import select_overlay
+from deepkick.agents.speech import Speech, spoken_text
 from deepkick.contracts import LANGS, PERSONAS
 from deepkick.orchestrator import Orchestrator, live_events, replay_events
 
@@ -23,8 +24,8 @@ def _log_failure(task: asyncio.Task) -> None:
         log.error("stage=api orchestrator stopped: %r", task.exception())
 
 
-def create_app(orchestrator: Orchestrator | None = None,
-               events: AsyncIterator[dict[str, Any]] | None = None) -> FastAPI:
+def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[dict[str, Any]] | None = None,
+               speech: Speech | None = None) -> FastAPI:
     """Build the API. With no arguments, startup runs an orchestrator on REPLAY_FILE if set, else on Event Hubs."""
 
     @asynccontextmanager
@@ -35,6 +36,7 @@ def create_app(orchestrator: Orchestrator | None = None,
         replay = os.environ.get("REPLAY_FILE")
         app.state.mode = "injected" if events else "replay" if replay else "live"
         app.state.orchestrator = orchestrator or Orchestrator()
+        app.state.speech = speech or Speech.from_env()
         stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "30"))) if replay
                             else live_events())
         task = asyncio.create_task(app.state.orchestrator.run(stream))
@@ -56,6 +58,20 @@ def create_app(orchestrator: Orchestrator | None = None,
         orchestrator = app.state.orchestrator
         profile = orchestrator.profile | {"lang": lang} | ({"persona": persona} if persona else {})
         return orchestrator.history(profile)[::-1][:limit]
+
+    @app.get("/speech/{overlay_id}", responses={200: {"content": {"audio/mpeg": {}}}})
+    def speech_clip(overlay_id: str, persona: Literal["analyst", "casual", "player"],
+                    lang: Literal["en", "ar"]) -> Response:
+        """The overlay's headline and detail spoken as MP3: 404 for an unknown overlay, 503 if synthesis failed."""
+        overlay = app.state.orchestrator.released_overlay(overlay_id, persona, lang)
+        if overlay is None:
+            raise HTTPException(404, f"no released overlay {overlay_id!r}")
+        voice = app.state.speech
+        audio = voice and voice.synthesize(spoken_text(overlay["payload"]), persona, lang, overlay_id=overlay_id,
+                                           event_id=overlay_id.rsplit("-", 3)[0])  # id: <event>-<type>-<persona>-<lang>
+        if audio is None:
+            raise HTTPException(503, "commentary is unavailable for this overlay")  # the text overlay still ships
+        return Response(audio, media_type="audio/mpeg")
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
