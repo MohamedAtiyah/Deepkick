@@ -101,6 +101,45 @@ class Translator:
         return [self.cache[(t, lang)] for t in texts]
 
 
+def translate_batch(texts: list[str], translator: Translator | None, lang: str,
+                    event_id: str | None) -> dict[str, str] | None:
+    """{english: translated} for one batch, or None once the Translator fails after ATTEMPTS tries; never raises.
+
+    A 429 waits out RATE_LIMIT_BACKOFF_S (or Retry-After) without using up an attempt, as for model calls.
+    """
+    attempt, backoffs = 1, iter(RATE_LIMIT_BACKOFF_S)
+    while translator and attempt <= ATTEMPTS:
+        try:
+            return dict(zip(texts, translator.translate(texts, lang)))
+        except Exception as exc:  # timeouts, HTTP errors and malformed replies all get the retry, then English
+            rate_limited = isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429
+            backoff = next(backoffs, None) if rate_limited else None
+            if backoff is not None:
+                wait = min(RETRY_AFTER_MAX_S, _retry_after(exc) or backoff)
+                log.warning("stage=translate event_id=%s rate_limited=429 retry_in_s=%.1f", event_id, wait)
+                narrative._sleep(wait)
+                continue
+            log.warning("stage=translate event_id=%s attempt=%d failed: %s: %s",
+                        event_id, attempt, type(exc).__name__, exc)
+        attempt += 1
+    return None
+
+
+def translate_recap(versions: dict[str, dict[str, Any]], translator: Translator | None, lang: str,
+                    event_id: str | None) -> dict[str, dict[str, Any]]:
+    """The three persona recaps in `lang` in one batch; a recap whose numbers changed keeps its English text."""
+    start = time.monotonic()
+    translated = translate_batch([versions[p]["text"] for p in PERSONAS], translator, lang, event_id)
+    out = {}
+    for p in PERSONAS:
+        english = versions[p]["text"]
+        kept = translated is not None and same_numbers(english, translated[english])
+        out[p] = {"text": translated[english] if kept else english, "fallback": not kept}
+    log.info("stage=translate event_id=%s recap=yes duration_ms=%.0f fallback=%s", event_id,
+             (time.monotonic() - start) * 1000, "yes" if any(v["fallback"] for v in out.values()) else "no")
+    return out
+
+
 def translate_versions(versions: dict[str, Any], translator: Translator | None, lang: str,
                        event_id: str | None) -> dict[str, dict[str, Any]]:
     """The three persona versions in `lang`. Each is wholly translated, or the English text with `fallback: true`.
@@ -114,25 +153,10 @@ def translate_versions(versions: dict[str, Any], translator: Translator | None, 
     evidence = {p: versions[p].get("evidence", []) for p in PERSONAS}
     if lang == "en":
         return {p: english[p] | {"evidence": evidence[p], "fallback": False} for p in PERSONAS}
-    start, translated = time.monotonic(), None
+    start = time.monotonic()
     labels = [e["label"] for p in PERSONAS for e in evidence[p]]
-    texts = [english[p][k] for p in PERSONAS for k in FIELDS] + labels
-    attempt, backoffs = 1, iter(RATE_LIMIT_BACKOFF_S)
-    while translator and attempt <= ATTEMPTS:
-        try:
-            translated = dict(zip(texts, translator.translate(texts, lang)))
-            break
-        except Exception as exc:  # timeouts, HTTP errors and malformed replies all get the retry, then English
-            rate_limited = isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 429
-            backoff = next(backoffs, None) if rate_limited else None
-            if backoff is not None:
-                wait = min(RETRY_AFTER_MAX_S, _retry_after(exc) or backoff)
-                log.warning("stage=translate event_id=%s rate_limited=429 retry_in_s=%.1f", event_id, wait)
-                narrative._sleep(wait)
-                continue
-            log.warning("stage=translate event_id=%s attempt=%d failed: %s: %s",
-                        event_id, attempt, type(exc).__name__, exc)
-        attempt += 1
+    translated = translate_batch([english[p][k] for p in PERSONAS for k in FIELDS] + labels, translator, lang,
+                                 event_id)
     out = {}
     for p in PERSONAS:
         kept = translated is not None and all(same_numbers(english[p][k], translated[english[p][k]]) for k in FIELDS)

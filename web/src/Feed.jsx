@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { clockMs } from "./live.js";
 import { LABEL, Text } from "./OverlayStack.jsx";
 
-const SOURCE = { model: "AI-explained", template: "Stats template" };
+export const SOURCE = { model: "AI-explained", template: "Stats template" };
 
 /** Who wrote the card, and a collapsible list of the match facts it cites (label: value). */
 function HowWeKnow({ payload, lang, dir }) {

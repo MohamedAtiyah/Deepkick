@@ -8,6 +8,7 @@ import OverlayStack from "./OverlayStack.jsx";
 import Feed from "./Feed.jsx";
 import Panel from "./Panel.jsx";
 import Tabs from "./Tabs.jsx";
+import CatchUp from "./CatchUp.jsx";
 
 const WIDE = "(min-width: 1024px)"; // the feed gets its own column; below this it lives in the Moments tab
 const wide = () => matchMedia(WIDE).matches;
@@ -52,7 +53,8 @@ export default function App() {
           <span className="tagline">Every moment explained, in your words.</span>
         </div>
         <Panel profile={profile} onChange={setProfile} />
-        <button className="toggle" aria-pressed={commentary} onClick={() => setCommentary(!commentary)}>
+        <CatchUp profile={profile} />
+        <button className="toggle commentary" aria-pressed={commentary} onClick={() => setCommentary(!commentary)}>
           Commentary {commentary ? "on" : "off"}
         </button>
         <ThemeToggle />

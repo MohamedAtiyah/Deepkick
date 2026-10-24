@@ -18,6 +18,12 @@ MP3 = b"ID3fake-mp3"
 NS = {"s": "http://www.w3.org/2001/10/synthesis"}
 
 
+def _latest(api, persona, lang):
+    """The newest released overlay for (persona, lang)."""
+    orchestrator = api.app.state.orchestrator
+    return orchestrator.history(orchestrator.profile | {"persona": persona, "lang": lang})[-1]
+
+
 def fake_speech(*statuses):
     """A Speech client answered in-process: one status per call (200 returns MP3), repeating the last."""
     requests = []
@@ -108,7 +114,7 @@ def test_speech_endpoint_serves_mp3_404s_unknown_overlays_and_503s_failures():
     for voice, ok in ((speech, True), (failing, False)):
         with TestClient(create_app(_orchestrator(), replay_events(REPLAY_PATH), speech=voice)) as api:
             _wait_until(lambda: api.get("/healthz").json()["status"] == "finished")
-            overlay = api.get("/recap", params={"persona": "casual", "lang": "en"}).json()[0]
+            overlay = _latest(api, "casual", "en")
             response = api.get(f"/speech/{overlay['overlay_id']}", params={"persona": "casual", "lang": "en"})
             if ok:
                 assert response.status_code == 200 and response.headers["content-type"] == "audio/mpeg"
@@ -128,6 +134,6 @@ def test_speech_endpoint_serves_mp3_404s_unknown_overlays_and_503s_failures():
 def test_without_speech_settings_every_clip_is_a_503():
     with TestClient(create_app(_orchestrator(), replay_events(REPLAY_PATH))) as api:
         _wait_until(lambda: api.get("/healthz").json()["status"] == "finished")
-        overlay = api.get("/recap", params={"persona": "player", "lang": "ar"}).json()[0]
+        overlay = _latest(api, "player", "ar")
         clip = api.get(f"/speech/{overlay['overlay_id']}", params={"persona": "player", "lang": "ar"})
         assert clip.status_code == 503
