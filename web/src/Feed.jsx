@@ -13,14 +13,14 @@ export const EvidenceList = ({ evidence, lang, dir, ...props }) => (
   </dl>
 );
 
-/** Who wrote the card, an "Ask about this" button, and a collapsible list of the facts it cites. */
+/** An "AI-explained" badge when the model wrote the card, "Ask about this", and the collapsible facts it cites. */
 function HowWeKnow({ payload, lang, dir, onAsk }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
     <>
       <div className="how">
-        <span className={`source ${payload.source}`}>{SOURCE[payload.source]}</span>
+        {payload.source === "model" && <span className="source model">{SOURCE.model}</span>}
         {onAsk && <button onClick={onAsk}>Ask about this</button>}
         {payload.evidence.length > 0 && (
           <button aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>How we know</button>

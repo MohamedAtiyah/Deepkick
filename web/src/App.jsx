@@ -34,7 +34,7 @@ function ThemeToggle() {
 }
 
 export default function App() {
-  const [profile, setProfile] = useState({ persona: "casual", club: "", player: "", lang: "en" });
+  const [profile, setProfile] = useState({ persona: "casual", lang: "en" });
   // Latest overlay per moment: a persona switch replaces the text of what is already on screen.
   const [overlays, setOverlays] = useState(() => new Map());
   const state = useMatchState();

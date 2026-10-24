@@ -160,14 +160,14 @@ def test_bad_persona_or_language_is_a_422(at_20):
 
 
 def test_arabic_answers_are_translated_with_every_number_kept(at_20):
-    from tests.test_translate import ARABIC, fake_translator
+    from tests.test_translate import ARABIC, as_arabic, fake_translator
 
     translator, _ = fake_translator()
     api, _ = at_20(GROUNDED, translator=translator)
     out = _ask(api, lang="ar").json()
     assert out["answer"].startswith(ARABIC) and "3" in out["answer"] and "2-0" in out["answer"]
-    assert [e["label"] for e in out["evidence"]] == [ARABIC + "Calderbrook Athletic shots",
-                                                     ARABIC + "Calderbrook Athletic goals"]
+    assert [e["label"] for e in out["evidence"]] == [as_arabic("Calderbrook Athletic shots", translator),
+                                                     as_arabic("Calderbrook Athletic goals", translator)]
     assert [e["value"] for e in out["evidence"]] == [3, 2]
     dropped, _ = fake_translator(change=lambda t: t.replace('<span class="notranslate">3</span>', "", 1))
     api, _ = at_20(GROUNDED, translator=dropped)
