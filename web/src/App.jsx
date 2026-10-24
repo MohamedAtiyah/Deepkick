@@ -10,6 +10,7 @@ import Panel from "./Panel.jsx";
 import Tabs from "./Tabs.jsx";
 import CatchUp from "./CatchUp.jsx";
 import Timeline from "./Timeline.jsx";
+import Ask from "./Ask.jsx";
 
 const WIDE = "(min-width: 1024px)"; // the feed gets its own column; below this it lives in the Moments tab
 const wide = () => matchMedia(WIDE).matches;
@@ -45,9 +46,12 @@ export default function App() {
   const [commentary, setCommentary] = useState(false);
   useCommentary(overlays, state?.match_clock, commentary);
   const [selected, setSelected] = useState(null); // a moment picked on the timeline: { key, coordinates, team }
+  const [askAbout, setAskAbout] = useState(null); // the overlay an "Ask about this" button picked
   const feed = (
-    <Feed overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} selected={selected?.key} />
+    <Feed overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} selected={selected?.key}
+          onAsk={setAskAbout} />
   );
+  const ask = <Ask profile={profile} about={askAbout} onClearAbout={() => setAskAbout(null)} />;
 
   return (
     <div className="app">
@@ -71,13 +75,17 @@ export default function App() {
             <Pitch state={state} highlight={selected} />
             <OverlayStack overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} />
           </section>
-          <Tabs state={state} profile={profile} overlays={overlays} feed={isWide ? null : feed} selected={selected} />
+          <Tabs state={state} profile={profile} overlays={overlays} feed={isWide ? null : <>{feed}{ask}</>}
+                selected={selected} />
         </div>
         {isWide && (
           <aside className="feed-col" aria-label="Live feed">
-            <div className="feed-scroll">
-              <h2 className="section-title">Live feed</h2>
-              {feed}
+            <div className="feed-stack">
+              <div className="feed-scroll">
+                <h2 className="section-title">Live feed</h2>
+                {feed}
+              </div>
+              {ask}
             </div>
           </aside>
         )}

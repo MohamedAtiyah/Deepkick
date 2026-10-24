@@ -148,6 +148,11 @@ class Orchestrator:
                                             if entry["minute"] <= now // 60],
                 "moments": moments}
 
+    def released_moment(self, overlay_id: str) -> dict[str, Any] | None:
+        """The released moment behind an overlay id ("<moment_id>-<persona>-<lang>"), or None."""
+        moment_id = overlay_id.rsplit("-", 2)[0]
+        return next((moment for moment, _ in self._released if moment["moment_id"] == moment_id), None)
+
     def released_overlay(self, overlay_id: str, persona: str, lang: str) -> dict[str, Any] | None:
         """The released overlay with this id for (persona, lang), or None if no released moment has that id."""
         for moment, versions in self._released:

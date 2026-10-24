@@ -4,29 +4,35 @@ import { LABEL, Text } from "./OverlayStack.jsx";
 
 export const SOURCE = { model: "AI-explained", template: "Stats template" };
 
-/** Who wrote the card, and a collapsible list of the match facts it cites (label: value). */
-function HowWeKnow({ payload, lang, dir }) {
+/** A list of cited facts as label: value; values stay left-to-right in Arabic. */
+export const EvidenceList = ({ evidence, lang, dir, ...props }) => (
+  <dl className="evidence" lang={lang} dir={dir} {...props}>
+    {evidence.map((e) => (
+      <div key={e.label}><dt>{e.label}</dt><dd><bdi dir="ltr">{e.value}</bdi></dd></div>
+    ))}
+  </dl>
+);
+
+/** Who wrote the card, an "Ask about this" button, and a collapsible list of the facts it cites. */
+function HowWeKnow({ payload, lang, dir, onAsk }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
     <>
       <div className="how">
         <span className={`source ${payload.source}`}>{SOURCE[payload.source]}</span>
+        {onAsk && <button onClick={onAsk}>Ask about this</button>}
         {payload.evidence.length > 0 && (
           <button aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>How we know</button>
         )}
       </div>
-      <dl id={id} className="evidence" hidden={!open} lang={lang} dir={dir}>
-        {payload.evidence.map((e) => (
-          <div key={e.label}><dt>{e.label}</dt><dd><bdi dir="ltr">{e.value}</bdi></dd></div>
-        ))}
-      </dl>
+      <EvidenceList id={id} evidence={payload.evidence} lang={lang} dir={dir} hidden={!open} />
     </>
   );
 }
 
 /** Every overlay whose moment has come, newest first: full cards, or one line each when `compact`. */
-export default function Feed({ overlays, matchClock, lang, compact = false, selected = null }) {
+export default function Feed({ overlays, matchClock, lang, compact = false, selected = null, onAsk = null }) {
   const list = useRef(null);
   useEffect(() => {
     const card = list.current?.querySelector(".selected");
@@ -63,7 +69,7 @@ export default function Feed({ overlays, matchClock, lang, compact = false, sele
               <p><Text>{o.payload.detail}</Text></p>
               <p className="why"><Text>{o.payload.why}</Text></p>
             </div>
-            <HowWeKnow payload={o.payload} lang={lang} dir={dir} />
+            <HowWeKnow payload={o.payload} lang={lang} dir={dir} onAsk={onAsk && (() => onAsk(o))} />
           </article>
         ))
       )}
