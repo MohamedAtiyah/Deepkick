@@ -115,9 +115,36 @@ button, select { font: inherit; color: inherit; }
   font-weight: 600;
   cursor: pointer;
 }
-.toggle::before { content: "🔈 "; }
+.commentary::before { content: "🔈 "; }
 .toggle[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
-.toggle[aria-pressed="true"]::before { content: "🔊 "; }
+.commentary[aria-pressed="true"]::before { content: "🔊 "; }
+
+/* "Catch me up": a modal with the last ten minutes, nothing after the current clock. */
+.catch-up-panel {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 20px 60px var(--shadow);
+}
+.catch-up-panel::backdrop { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.catch-up-panel header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.catch-up-panel h2 { font-size: 18px; }
+.catch-up-panel header button { padding: 4px 8px; border: 0; background: none; font-size: 16px; cursor: pointer; }
+.catch-up-panel .window { color: var(--text-muted); font-size: 13px; }
+.summary { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.summary div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+.summary dt { color: var(--text-muted); }
+.summary dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.recap-item { padding: 10px 0; border-top: 1px solid var(--border); }
+.recap-item:first-of-type { border-top: 0; }
+.recap-item header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.recap-item .source { margin-left: auto; }
+.recap-item p { font-size: 14px; line-height: 1.55; }
 
 .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; align-self: flex-end; }
 .segmented button {

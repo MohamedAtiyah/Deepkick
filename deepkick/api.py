@@ -1,4 +1,4 @@
-"""Overlay API: serves the orchestrator's shared match state over FastAPI (/state, /recap, /ws, /speech, /healthz)."""
+"""Overlay API: the orchestrator's shared match state over FastAPI (/state, /recap, /catchup, /ws, /speech, /healthz)."""
 
 from __future__ import annotations
 
@@ -52,12 +52,17 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         return app.state.orchestrator.snapshot()
 
     @app.get("/recap")
-    def recap(persona: Literal["analyst", "casual", "player"] | None = None, lang: Literal["en", "ar"] = "en",
-              limit: int | None = Query(None, ge=1)) -> list[dict[str, Any]]:
-        """Overlays released so far, newest first, for one persona (default: the run's) and language."""
+    def recap(persona: Literal["analyst", "casual", "player"] | None = None,
+              lang: Literal["en", "ar"] = "en") -> list[dict[str, Any]]:
+        """The half-time and full-time recaps written so far, newest first, for one persona and language."""
         orchestrator = app.state.orchestrator
-        profile = orchestrator.profile | {"lang": lang} | ({"persona": persona} if persona else {})
-        return orchestrator.history(profile)[::-1][:limit]
+        return orchestrator.recaps(persona or orchestrator.profile["persona"], lang)
+
+    @app.get("/catchup")
+    def catchup(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
+                minutes: int = Query(10, ge=1, le=120)) -> dict[str, Any]:
+        """The score change, moment headlines and momentum of the last `minutes` of match clock, up to now only."""
+        return app.state.orchestrator.catch_up(persona, lang, minutes)
 
     @app.get("/speech/{overlay_id}", responses={200: {"content": {"audio/mpeg": {}}}})
     def speech_clip(overlay_id: str, persona: Literal["analyst", "casual", "player"],

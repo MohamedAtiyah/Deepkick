@@ -149,7 +149,7 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
   - **Timeouts and errors:** a timeout or error in one moment uses that moment's template fallback, and the other workers carry on.
 - **Clock order:** finished overlays are buffered and released in match-clock (`show_at_ms`) order, even when a later moment finishes first.
 - **Half-time and full-time:** these pass through as normal overlays until the recap agent exists.
-- **Shared state:** `Orchestrator.snapshot()` returns the Stats Agent snapshot and `Orchestrator.history()` the released overlays. These are ready for the FastAPI `/state` and `/recap` endpoints, which aren't built yet.
+- **Shared state:** `Orchestrator.snapshot()` returns the Stats Agent snapshot, `Orchestrator.history()` the released overlays, `Orchestrator.recaps()` the half-time and full-time recaps, and `Orchestrator.catch_up()` the last N match minutes. The API serves them as `/state`, `/ws`, `/recap` and `/catchup`.
 - **Logging:** each moment's handoff logs `stage=orchestrator moment_id=… duration_ms=… fallback=yes|no model=yes|no`. The run ends with `summary events=… moments=… overlays_emitted=… overlays_dropped=… model_explained=… templated=… fallbacks=… rate_limits=… wall_s=…`, which is also printed as JSON on stderr.
   - `model_explained`: the model wrote the narrative.
   - `templated`: priority 1, so no model call.
@@ -198,7 +198,8 @@ The 429 backoff itself (schedule, Retry-After, and not using up the normal attem
 | Endpoint | What it returns |
 |---|---|
 | `GET /state` | the current match snapshot: score, clock, status, ball position, team stats with momentum, player stats |
-| `GET /recap?persona=&lang=&limit=` | overlays released so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona) in `en` or `ar` (default `en`), at most `limit` |
+| `GET /recap?persona=&lang=` | the half-time and full-time recaps written so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona) in `en` or `ar` (default `en`). See [Recap and catch-up](#10-recap-and-catch-up) |
+| `GET /catchup?persona=&lang=&minutes=10` | the score change, one-line moment headlines and momentum of the last `minutes` (1–120) of match clock, up to the current clock only; no model call |
 | `WS /ws?persona=&club=&player=&lang=` | first every overlay already released for that viewer (so a late viewer isn't blank), then each new overlay as it's released |
 | `GET /speech/{overlay_id}?persona=…&lang=…` | the overlay's headline and detail spoken as `audio/mpeg`; 404 for an unknown overlay, 503 if synthesis failed (see [Spoken commentary](#9-spoken-commentary)) |
 | `GET /healthz` | the run status (`not_started`, `running`, `finished`, `failed`), where each stage gets its input (`replay` or `live`; `foundry` or `templates`), and the run counters |
@@ -207,7 +208,7 @@ The 429 backoff itself (schedule, Retry-After, and not using up the normal attem
   - **Pacing:** replay ingest is paced against the match clock at `REPLAY_SPEED` times real time, default 30, so a 90-minute match takes about 3 minutes. `/state` therefore follows the stream's current position instead of jumping to full time while the overlays are still in the first half. Overlays still trail `/state` by the model latency, about 6–20 s per moment.
   - **Unpaced:** `REPLAY_SPEED=0` turns pacing off, which is what the tests use.
 - **Many viewers, one run:** each WebSocket client has its own profile. On every release the orchestrator hands the moment and its three cached persona versions to each connected client, and `select_overlay` renders that client's persona, favourite-club boost and language. So any number of viewers share one model call per moment.
-- **Bad parameters:** an unknown `persona` or `lang` on `/ws` closes the socket (code 1008). On `/recap` it returns 422.
+- **Bad parameters:** an unknown `persona` or `lang` on `/ws` closes the socket (code 1008). On `/recap`, `/catchup` and `/speech` it returns 422.
 
 ```bash
 # Demo with no Azure at all: replay seed 42 at 30x real time (90 minutes in 3)
@@ -215,7 +216,8 @@ REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl .venv/bin/uvicorn deepkick.ap
 
 # Then, in another terminal
 curl localhost:8000/state
-curl "localhost:8000/recap?persona=casual&limit=5"
+curl "localhost:8000/recap?persona=casual"
+curl "localhost:8000/catchup?persona=casual&minutes=10"
 curl localhost:8000/healthz
 .venv/bin/python -m websockets "ws://localhost:8000/ws?persona=analyst&club=ASH"
 
@@ -226,7 +228,7 @@ curl localhost:8000/healthz
 **Azure service:** none of its own. Through the orchestrator it uses Event Hubs in live mode and the Foundry model when `FOUNDRY_*` is set. It will run on Azure Container Apps.
 
 **Tests:** [`tests/test_api.py`](tests/test_api.py) uses FastAPI's TestClient, the seed-42 replay and a fake model client, with no network. It covers:
-- the `/state`, `/recap` (order, persona, limit, bad input) and `/healthz` shapes;
+- the `/state`, `/recap` (order, persona, bad input) and `/healthz` shapes;
 - a WebSocket client receiving the backlog and then the live overlays, with the replay paused at half-time to split them;
 - two clients with different personas and favourites each getting their own text and priorities;
 - every overlay validating against the Overlay contract;
@@ -252,7 +254,8 @@ curl localhost:8000/healthz
   - **Movement:** players ease to their spots over 400 ms and the ball glides over 600 ms, so nothing teleports.
 - **Lower-third:** one overlay at a time on the pitch, showing its headline, detail and why for its own `duration_ms`. It never appears before the match clock reaches its `show_at_ms`. When several are due, the highest `priority` goes first and the rest queue. An overlay that has waited more than one match minute (counted from its `show_at_ms`, or from when it reached the browser if that was later) is skipped on the pitch, since the feed already has it; goals are never skipped. Without this, at 30x replay each 6–8 second lower-third holds the screen for 3–4 match minutes and the queue falls about 8 minutes behind; with it, lower-thirds trail the clock by 1–3 minutes, mostly the pipeline's own delay. The queue also keeps only the newest 4, so a late viewer's backlog doesn't play for minutes.
 - **Live feed:** every overlay whose moment has come, as cards with a type chip, match clock, headline, detail and why, newest first. Each card shows who wrote it ("AI-explained" or "Stats template") and a collapsible **How we know** list of the facts it cites (see [Explainability](#8-explainability)). It is an `aria-live="polite"` region, so screen readers announce new moments. The lower-third is not, so nothing is announced twice.
-- **Tabs:** Moments (the feed on narrow screens; a one-line timeline beside the full feed on desktop), Stats (head-to-head team stats from `/state`: possession, shots, shots on target, expected goals, passes, pass accuracy, tackles and pressures won, top shot speed and momentum), Lineups (formation, manager, starting eleven and bench from `data/league.json`) and Recap (`/recap` for the current persona, newest first, refreshed every 5 seconds). The tabs follow the WAI-ARIA pattern: arrow keys, Home and End move between them.
+- **Tabs:** Moments (the feed on narrow screens; a one-line timeline beside the full feed on desktop), Stats (head-to-head team stats from `/state`: possession, shots, shots on target, expected goals, passes, pass accuracy, tackles and pressures won, top shot speed and momentum), Lineups (formation, manager, starting eleven and bench from `data/league.json`) and Recap (the half-time and full-time recaps from `/recap` for the current persona and language, with an "AI-explained" or "Stats template" badge, refreshed every 5 seconds). The tabs follow the WAI-ARIA pattern: arrow keys, Home and End move between them.
+- **Catch me up:** a top-bar button opens a dialog with the last ten match minutes. See [Recap and catch-up](#10-recap-and-catch-up).
 - **Commentary:** a toggle in the top bar speaks each new overlay aloud. See [Spoken commentary](#9-spoken-commentary).
 - **Personalisation:** persona (analyst, casual fan, player focus), language, favourite club and favourite player (the squads from `data/league.json`), as compact selects in the top bar.
   - **Language:** English or Arabic. With Arabic, only the overlay, feed and recap text blocks switch to right-to-left, with a font stack that shapes Arabic well. Scores are isolated left-to-right, because after an Arabic word the browser would otherwise show "1-0" as "0-1". The score strip, pitch, clocks, chips and controls stay left-to-right.
@@ -270,7 +273,7 @@ cd web && npm install && npm run dev
 cd web && npm test
 ```
 
-In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/recap`, `/healthz` and `/ws` to `localhost:8000`. `npm run build` writes a static site to `web/dist/` for Azure Static Web Apps.
+In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/recap`, `/catchup`, `/healthz`, `/speech` and `/ws` to `localhost:8000`. `npm run build` writes a static site to `web/dist/` for Azure Static Web Apps.
 
 ## 7. Personalise: Persona Agent
 
@@ -328,7 +331,7 @@ In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/r
 - Arabic-Indic digits coming back as Western digits;
 - timeouts and malformed replies falling back to English with the flag set.
 
-[`tests/test_api.py`](tests/test_api.py) checks Arabic overlays over `/ws?lang=ar` and `/recap?lang=ar`, with translated evidence labels and untouched values.
+[`tests/test_api.py`](tests/test_api.py) checks Arabic overlays over `/ws?lang=ar` and Arabic recaps over `/recap?lang=ar`, with translated evidence labels and untouched values.
 
 ## 8. Explainability
 
@@ -380,3 +383,52 @@ Together with the number checks (a narrative may only cite numbers present in th
 - `/speech` returning MP3, 404, 422 and 503.
 
 [`web/src/commentary.test.js`](web/src/commentary.test.js) checks that clips more than 15 seconds stale are skipped.
+
+## 10. Recap and catch-up
+
+### Recap Agent
+
+[`deepkick/agents/recap.py`](deepkick/agents/recap.py) writes a recap at the half-time and full-time moments. One Foundry call returns all three persona recaps, using the same pattern as the Persona Agent: one call, checks one version at a time, and a template for each version that fails.
+
+- **Input:** the stats snapshot at that clock (score, and each team's goals, shots, shots on target, expected goals, possession, pass accuracy, tackles won and pressures won), plus every moment detected up to that clock (type, clock, football minute, team, player and facts).
+- **Checks, one version at a time:**
+  - 3 to 5 sentences;
+  - every number must appear in that input (the clocks count);
+  - every goal must be named with its scorer and minute. The minute is the moment's football minute, so 13:52 on the clock is the 14th minute.
+
+  A version that fails is replaced by its template. If all three fail, or the reply isn't JSON with all three, the call is retried once, then every version is templated.
+- **Template:** built from the facts alone: the score, every goal with scorer and minute, and three stats chosen per persona. The analyst gets expected goals, shots on target and pass accuracy; the casual fan gets shots, possession and expected goals; the player focus gets shots on target, shots and expected goals. The templates pass the same checks as the model.
+- **When:** the recap is written after that moment's overlay is released, so the recap call never delays the overlay.
+- **Shared state:** recaps are stored in the orchestrator's shared state.
+- **Arabic:** each recap is translated once, in one Translator batch for all three personas (`translate_recap` in [`deepkick/agents/translate.py`](deepkick/agents/translate.py)). Names and numbers are protected, and a recap whose numbers changed keeps its English text.
+- **API:** `GET /recap?persona=&lang=` returns `{recap_id, type, match_clock, score, persona, lang, text, source}` for each recap, newest first. `source` is `model` or `template`.
+- **Logging:** each handoff logs `stage=recap event_id=… type=half_time|full_time duration_ms=… fallback=yes|no sources=analyst:model|template,…`. Each templated version and each failed attempt is logged with its reason.
+
+**Azure services:** the Microsoft Foundry deployment (`FOUNDRY_*`) and Azure AI Translator for Arabic. Without `FOUNDRY_*`, every recap uses its template.
+
+### Catch me up
+
+`GET /catchup?persona=&lang=&minutes=10` answers "what did I miss?" without a model call, so it is deterministic and instant. It is spoiler-safe: everything is computed from moments at or before the current match clock, never later.
+
+- **Score change:** the score at the start of the window and now, and the number of goals in between.
+- **Moments:** one line each, newest first, for every released moment in the window. Each line is that moment's overlay headline, in the viewer's persona and language.
+- **Momentum:** the team with the larger momentum share, as of the latest moment.
+
+In the broadcast view, the **Catch me up** button in the top bar opens a modal dialog with the last ten minutes. It closes with its ✕ button or Escape. Scores stay left-to-right, and headlines are right-to-left in Arabic.
+
+```bash
+curl "localhost:8000/recap?persona=analyst&lang=ar"
+curl "localhost:8000/catchup?persona=casual&lang=en&minutes=10"
+```
+
+**Tests:** [`tests/test_recap.py`](tests/test_recap.py) runs the seed-42 replay with a fake model client. It covers:
+- the full-time recap naming all 5 goals with scorer and minute (and the half-time recap leaving out the second-half goal);
+- one model call writing all three recaps;
+- one failed version templated alone;
+- timeouts falling back to the template after one retry;
+- the checks rejecting bad lengths, invented numbers and missing goals;
+- the templates passing their own checks;
+- a catch-up at 30:00 containing nothing after 30:00, with the score as it stood at 30:00;
+- catch-up headlines following the viewer's persona.
+
+[`tests/test_api.py`](tests/test_api.py) checks the `/recap` shape and Arabic recaps.
