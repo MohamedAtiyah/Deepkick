@@ -12,7 +12,7 @@ import CatchUp from "./CatchUp.jsx";
 import Timeline from "./Timeline.jsx";
 import Chat from "./Chat.jsx";
 
-const WIDE = "(min-width: 1024px)"; // the feed gets its own column; below this it lives in the Moments tab
+const WIDE = "(min-width: 1024px)"; // the feed gets its own column; below this it follows the tabs
 const DOCKED = "(min-width: 1280px)"; // the chat gets its own column; below this it opens as a drawer or a sheet
 
 /** Whether a media query matches, kept in step with the window. */
@@ -93,14 +93,19 @@ export default function App() {
             <Pitch state={state} highlight={selected} />
             <OverlayStack overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} />
           </section>
-          <Tabs state={state} profile={profile} overlays={overlays} feed={isWide ? null : feed}
-                selected={selected} />
+          <Tabs state={state} profile={profile} />
+          {!isWide && (
+            <section className="feed-section" aria-label="Moments">
+              <h2 className="section-title">Moments</h2>
+              {feed}
+            </section>
+          )}
         </div>
         {isWide && (
-          <aside className="feed-col" aria-label="Live feed">
+          <aside className="feed-col" aria-label="Moments">
             <div className="feed-stack">
               <div className="feed-scroll">
-                <h2 className="section-title">Live feed</h2>
+                <h2 className="section-title">Moments</h2>
                 {feed}
               </div>
             </div>
