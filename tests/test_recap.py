@@ -8,7 +8,7 @@ import pytest
 
 from deepkick.agents.narrative import NarrativeAgent
 from deepkick.agents.persona import PersonaAgent
-from deepkick.agents.recap import RecapAgent, check_recap, goals, recap_inputs, template_recap
+from deepkick.agents.recap import SYSTEM_PROMPT, RecapAgent, check_recap, goals, recap_inputs, template_recap
 from deepkick.contracts import PERSONAS
 from deepkick.orchestrator import Orchestrator, replay_events
 from deepkick.simulator import clock_seconds
@@ -92,14 +92,35 @@ def test_timeouts_fall_back_to_the_template_after_one_retry(full_time, caplog):
 
 
 @pytest.mark.parametrize("text, problem", [
-    ("Calderbrook Athletic won it. Rafe Ironsby scored.", "3-5 sentences"),
-    ("One. Two. Three. Four. Five. Six.", "3-5 sentences"),
+    ("Calderbrook Athletic won it. Rafe Ironsby scored.", "3-6 sentences"),
+    ("One. Two. Three. Four. Five. Six. Seven.", "3-6 sentences"),
     ("Calderbrook Athletic won 3-2. It was close. They had 99 shots.", "numbers not in the inputs"),
     ("Calderbrook Athletic won 3-2. It was close. Rafe Ironsby scored in minute 14.", "leaves out goals"),
 ])
 def test_check_rejects_bad_recaps(full_time, text, problem):
     with pytest.raises(ValueError, match=problem):
         check_recap("analyst", {"text": text}, recap_inputs(*full_time))
+
+
+def test_the_inputs_list_every_goal_so_far_in_order(full_time, detected):
+    assert [(g["minute"], g["scorer"]) for g in recap_inputs(*full_time)["goals"]] == [
+        (14, "Rafe Ironsby"), (20, "Caius Mossington"), (22, "Caius Mossington"), (29, "Corin Rookwell"),
+        (33, "Caius Mossington"), (51, "Florin Underhay"), (59, "Rafe Ironsby"), (90, "Corin Rookwell")]
+    half_time = next((m, s) for m, s in detected if m["type"] == "half_time")
+    assert len(recap_inputs(*half_time, full_time[2])["goals"]) == 5
+
+
+def test_a_scorers_goals_can_share_one_mention(full_time):
+    text = ("Calderbrook Athletic won 5-3. Rafe Ironsby (14', 59') and Caius Mossington (20', 22', 33') scored for "
+            "them. Corin Rookwell (29', 90') and Florin Underhay (51') replied for Ashvale Wanderers.")
+    assert check_recap("casual", {"text": text}, recap_inputs(*full_time))["text"] == text
+
+
+def test_every_voice_must_name_the_goals_and_their_minutes_never_count_against_casual():
+    # Live seed-42 runs: the analyst wrote only stats, and casual's three-number cap dropped goal minutes.
+    assert "Every voice names every goal in `goals`" in SYSTEM_PROMPT
+    assert "analyst: the goals, then the numbers" in SYSTEM_PROMPT
+    assert "at most three numbers besides the\n  goal minutes" in SYSTEM_PROMPT
 
 
 def test_templates_pass_their_own_checks(full_time):

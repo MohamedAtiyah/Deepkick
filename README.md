@@ -394,9 +394,10 @@ Together with the number checks (a narrative may only cite numbers present in th
 
 [`deepkick/agents/recap.py`](deepkick/agents/recap.py) writes a recap at the half-time and full-time moments. One Foundry call returns all three persona recaps, using the same pattern as the Persona Agent: one call, checks one version at a time, and a template for each version that fails.
 
-- **Input:** the stats snapshot at that clock (score, and each team's goals, shots, shots on target, expected goals, possession, pass accuracy, tackles won and pressures won), plus every moment detected up to that clock (type, clock, football minute, team, player and facts).
+- **Input:** the stats snapshot at that clock (score, and each team's goals, shots, shots on target, expected goals, possession, pass accuracy, tackles won and pressures won), the goals so far in order (minute, team, scorer), and every moment detected up to that clock (type, clock, football minute, team, player and facts).
+- **Goals in every voice:** the prompt has every persona name every goal with its scorer and minute before any other number, and a player's goals can share one mention ("Caius Mossington (20', 22', 33')"). On the 8-goal seed-42 match, the analyst used to write only stats and casual's three-number cap dropped goal minutes, so 3 of 6 recaps fell back to the template. Goal minutes no longer count toward that cap, and the cap on sentences is 6 so the goals fit. Two live runs after the change: 0 of 12 recaps left out a goal; 1 analyst recap ran to 6 sentences under the old cap of 5.
 - **Checks, one version at a time:**
-  - 3 to 5 sentences;
+  - 3 to 6 sentences;
   - every number must appear in that input (the clocks count);
   - every goal must be named with its scorer and minute. The minute is the moment's football minute, so 13:52 on the clock is the 14th minute.
 
@@ -406,7 +407,7 @@ Together with the number checks (a narrative may only cite numbers present in th
 - **Shared state:** recaps are stored in the orchestrator's shared state.
 - **Arabic:** each recap is translated once, in one Translator batch for all three personas (`translate_recap` in [`deepkick/agents/translate.py`](deepkick/agents/translate.py)). Names and numbers are protected, and a recap whose numbers changed keeps its English text.
 - **API:** `GET /recap?persona=&lang=` returns `{recap_id, type, match_clock, score, persona, lang, text, source}` for each recap, newest first. `source` is `model` or `template`.
-- **Logging:** each handoff logs `stage=recap event_id=… type=half_time|full_time duration_ms=… fallback=yes|no sources=analyst:model|template,…`. Each templated version and each failed attempt is logged with its reason.
+- **Logging:** each handoff logs `stage=recap event_id=… type=half_time|full_time duration_ms=… fallback=yes|no sources=analyst:model|template,…`. Each templated version and each failed attempt is logged with its reason, and a templated version also logs the rejected text.
 
 **Azure services:** the Microsoft Foundry deployment (`FOUNDRY_*`) and Azure AI Translator for Arabic. Without `FOUNDRY_*`, every recap uses its template.
 
