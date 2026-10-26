@@ -40,7 +40,7 @@ class FakeChat:
 
 
 SPRINTS = [("top_sprints", {"n": 3})]
-FASTEST = "Fenn Grimsdyke was the fastest, at 33.0 km/h over 22.4 m in the 61:43 sprint."
+FASTEST = "Arlo Thistlewood was the fastest, at 33.0 km/h over 22.4 m in the 61:10 sprint."
 
 
 @pytest.fixture(scope="module")
@@ -59,7 +59,7 @@ def test_a_tool_call_then_a_grounded_answer(full, caplog):
     assert out["answer"] == FASTEST and out["source"] == "model" and out["tools_used"] == ["top_sprints"]
     assert out["data_until_clock"] == "90:00"
     assert out["cards"][0]["kind"] == "ranking" and out["cards"][0]["rows"][0] == {
-        "label": "Fenn Grimsdyke (61:43)", "value": 33.0, "unit": "km/h"}
+        "label": "Arlo Thistlewood (61:10)", "value": 33.0, "unit": "km/h"}
     first, second = client.calls
     assert first["reasoning_effort"] == "low" and first["tools"] and first["timeout"] <= 30
     assert json.loads(second["messages"][-1]["content"])["sprints"][0]["speed_kmh"] == 33.0  # the tool result
@@ -68,7 +68,7 @@ def test_a_tool_call_then_a_grounded_answer(full, caplog):
 
 
 def test_an_invented_number_is_retried_then_declined_with_the_cards(full, caplog):
-    client = FakeChat(SPRINTS, "Fenn Grimsdyke hit 35.5 km/h.", "Fenn Grimsdyke hit 36.2 km/h, really.")
+    client = FakeChat(SPRINTS, "Arlo Thistlewood hit 35.5 km/h.", "Arlo Thistlewood hit 36.2 km/h, really.")
     with caplog.at_level(logging.INFO, logger="deepkick.chat"):
         out = ChatAgent(client, "m").reply(_ask("Who was the fastest?"), "casual", "en", full)
     assert out["source"] == "declined" and out["answer"] == DECLINE_WITH_CARDS
@@ -78,7 +78,7 @@ def test_an_invented_number_is_retried_then_declined_with_the_cards(full, caplog
 
 
 def test_a_retry_that_fixes_the_number_is_kept(full):
-    client = FakeChat(SPRINTS, "Fenn Grimsdyke hit 35.5 km/h.", FASTEST)
+    client = FakeChat(SPRINTS, "Arlo Thistlewood hit 35.5 km/h.", FASTEST)
     out = ChatAgent(client, "m").reply(_ask("Who was the fastest?"), "casual", "en", full)
     assert out["source"] == "model" and out["answer"] == FASTEST
 
@@ -143,7 +143,7 @@ def test_cards_are_built_in_python_from_tool_results(full):
                    {"name": "compare_players", "arguments": {}, "result": compare_players(full, "CAL09", "ASH09")},
                    {"name": "goals", "arguments": {}, "result": goals(full)}])
     assert [c["kind"] for c in built] == ["player", "comparison", "moments"]
-    assert built[0]["title"] == "Rafe Ironsby" and {"label": "Goals", "value": 1, "unit": ""} in built[0]["rows"]
+    assert built[0]["title"] == "Rafe Ironsby" and {"label": "Goals", "value": 2, "unit": ""} in built[0]["rows"]
     assert built[1]["columns"] == ["Rafe Ironsby", built[1]["columns"][1]] and len(built[1]["rows"][0]["value"]) == 2
     a, b = (compare_players(full, "CAL09", "ASH09")[k] for k in "ab")
     rows = {r["label"]: r for r in built[1]["rows"]}
