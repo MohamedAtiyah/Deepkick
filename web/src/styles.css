@@ -212,7 +212,8 @@ button, select { font: inherit; color: inherit; }
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 /* The feed column takes the left column's height and scrolls inside it, instead of stretching the page. */
 .feed-col { position: relative; min-height: 480px; }
-.feed-scroll { position: absolute; inset: 0; overflow-y: auto; padding-right: 4px; }
+.feed-stack { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; }
+.feed-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
 .section-title { margin-bottom: 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
 
 /* The pitch keeps its real 111:71 box (105 x 68 m plus room for the goals) at any width. */
@@ -323,7 +324,7 @@ button, select { font: inherit; color: inherit; }
   font-weight: 600;
   cursor: pointer;
 }
-.how button::after { content: " ▾"; }
+.how button[aria-expanded]::after { content: " ▾"; }
 .how button[aria-expanded="true"]::after { content: " ▴"; }
 .evidence { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
 .evidence div { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
@@ -482,3 +483,39 @@ button, select { font: inherit; color: inherit; }
   animation: pulse 1.6s ease-in-out infinite;
 }
 @media (max-width: 767px) { .timeline-plot { height: 96px; } }
+
+/* "Ask about this match": under the feed; the answer shows its evidence and who answered. */
+.ask { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.tabpanel .ask { margin-top: 14px; background: var(--surface-2); }
+.ask form { display: flex; gap: 8px; }
+.ask input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.ask form button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ask input:disabled, .ask form button:disabled { opacity: 0.6; cursor: wait; }
+.ask-about { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--text-muted); }
+.ask-about span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-about button { border: 0; background: none; cursor: pointer; font-size: 14px; }
+.ask-answer { margin-top: 10px; }
+.ask-answer p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; }
+.ask-error { margin: 8px 0 0; font-size: 13px; color: var(--warning); }
+.source.declined { border-style: dashed; }
+.how button + button { margin-left: 0; }
