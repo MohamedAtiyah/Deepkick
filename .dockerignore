@@ -1,0 +1,11 @@
+# Never send secrets or local state to the image build.
+.env
+.env.*
+!.env.example
+.git
+.claude
+.venv
+**/node_modules
+**/__pycache__
+web/dist
+docs

@@ -11,6 +11,7 @@ from typing import Annotated, Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 
 from deepkick.agents.chat import ChatAgent
@@ -175,6 +176,10 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         finally:
             orchestrator.listeners.remove(listener)
 
+    # The built broadcast view, mounted last so every API route above wins: one container serves site and API.
+    site = Path(os.environ.get("SITE_DIR", Path(__file__).resolve().parent.parent / "web" / "dist"))
+    if site.is_dir():
+        app.mount("/", StaticFiles(directory=site, html=True), name="site")
     return app
 
 
