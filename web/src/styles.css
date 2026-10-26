@@ -19,6 +19,8 @@
   --pitch-line: #ffffffcc;
   --ball: #ffffff;
   --shadow: #0f172a26;
+  --shadow-soft: #0f172a12;
+  --texture: #ffffff0d;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -41,6 +43,8 @@
     --pitch-line: #ffffffb3;
     --ball: #ffffff;
     --shadow: #00000080;
+    --shadow-soft: #00000047;
+    --texture: #ffffff0a;
     color-scheme: dark;
   }
 }
@@ -63,10 +67,17 @@
   --pitch-line: #ffffffb3;
   --ball: #ffffff;
   --shadow: #00000080;
+  --shadow-soft: #00000047;
+  --texture: #ffffff0a;
   color-scheme: dark;
 }
 
-:root { font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif; }
+:root {
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Inter", system-ui, sans-serif;
+  --raise: 0 1px 2px var(--shadow-soft), 0 6px 18px var(--shadow-soft);
+  font-family: var(--font-body);
+}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); }
 h1, h2, h3, h4, p { margin: 0; }
@@ -75,7 +86,8 @@ h1, h2, h3, h4, p { margin: 0; }
 button, select { font: inherit; color: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 
-.app { max-width: 1440px; margin: 0 auto; padding: 0 16px 24px; }
+.app { max-width: 1720px; margin: 0 auto; padding: 0 24px 32px; }
+@media (max-width: 767px) { .app { padding: 0 16px 88px; } } /* room for the floating Ask button */
 
 /* Top bar: wordmark, personalisation and theme. Sticky from tablet width up; on a phone it would eat the screen. */
 .topbar {
@@ -83,14 +95,17 @@ button, select { font: inherit; color: inherit; }
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 20px;
-  margin: 0 -16px;
-  padding: 10px 16px;
+  margin: 0 -24px 24px;
+  padding: 12px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
+  box-shadow: var(--raise);
 }
+@media (max-width: 767px) { .topbar { margin: 0 -16px 16px; padding: 10px 16px; } }
 @media (min-width: 768px) { .topbar { position: sticky; top: 0; z-index: 10; } }
 .brand { display: flex; flex-direction: column; margin-right: auto; }
-.wordmark { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+.wordmark { font-family: var(--font-display); font-size: 30px; font-weight: 800; letter-spacing: 0.01em; line-height: 1;
+  text-transform: uppercase; }
 .wordmark span { color: var(--accent); }
 .tagline { font-size: 12px; color: var(--text-muted); }
 
@@ -164,12 +179,14 @@ button, select { font: inherit; color: inherit; }
   grid-template-columns: auto 1fr auto 1fr auto;
   grid-template-areas: "status home score away clock";
   align-items: center;
-  gap: 12px 16px;
-  margin: 16px 0;
-  padding: 10px 16px;
+  gap: 12px 20px;
+  padding: 14px 20px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-left: 6px solid var(--home-club, var(--accent));
+  border-right: 6px solid var(--away-club, var(--accent));
+  border-radius: 14px;
   background: var(--surface);
+  box-shadow: var(--raise), inset 3px 0 0 var(--home-club-2, transparent), inset -3px 0 0 var(--away-club-2, transparent);
   font-weight: 700;
 }
 .scoreboard.waiting { display: flex; color: var(--text-muted); font-weight: 500; }
@@ -190,7 +207,8 @@ button, select { font: inherit; color: inherit; }
   font-size: 13px;
   letter-spacing: 0.04em;
 }
-.name { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.name { font-family: var(--font-display); font-size: 22px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .score {
   grid-area: score;
   display: flex;
@@ -198,26 +216,40 @@ button, select { font: inherit; color: inherit; }
   padding: 4px 14px;
   border-radius: 8px;
   background: var(--surface-2);
-  font-size: 28px;
+  font-family: var(--font-display);
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .score span { color: var(--text-muted); }
 .clock { grid-area: clock; display: flex; flex-direction: column; align-items: flex-end; font-variant-numeric: tabular-nums; }
-.clock span { font-size: 20px; }
+.clock span { font-family: var(--font-display); font-size: 30px; font-weight: 700; line-height: 1; }
 .clock small { white-space: nowrap; font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
 
-/* Main area: pitch and tabs on the left, the live feed on the right. */
-.layout { display: grid; gap: 16px; }
-@media (min-width: 1024px) { .layout { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); } }
-.main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+/* Main area: the chat on the left (from 1280px), the match in the centre, the live feed on the right (from 1024px). */
+.layout { display: grid; gap: 16px; align-items: start; }
+@media (min-width: 1024px) { .layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; } }
+@media (min-width: 1280px) { .layout { grid-template-columns: 360px minmax(0, 1fr) 340px; } }
+.main-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.feed-col { align-self: stretch; }
 /* The feed column takes the left column's height and scrolls inside it, instead of stretching the page. */
 .feed-col { position: relative; min-height: 480px; }
 .feed-stack { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; }
 .feed-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
-.section-title { margin-bottom: 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
+.section-title { margin-bottom: 12px; font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
 
 /* The pitch keeps its real 111:71 box (105 x 68 m plus room for the goals) at any width. */
-.pitch-card { position: relative; padding: 12px; border-radius: 12px; background: var(--pitch-surround); }
+.pitch-card { position: relative; padding: 16px; border-radius: 14px; background: var(--pitch-surround);
+  box-shadow: var(--raise); }
+.pitch::after {
+  content: "";
+  position: absolute;
+  inset: 1.4%;
+  background: repeating-linear-gradient(45deg, var(--texture) 0 2px, transparent 2px 7px);
+  pointer-events: none;
+}
 .pitch { position: relative; width: 100%; aspect-ratio: 111 / 71; container-type: inline-size; }
 .pitch svg { position: absolute; inset: 0; width: 100%; height: 100%; }
 .pitch .stripe { fill: var(--pitch); }
@@ -226,7 +258,7 @@ button, select { font: inherit; color: inherit; }
 .pitch .lines .spot { fill: var(--pitch-line); stroke: none; }
 .pitch .lines .goal { fill: color-mix(in srgb, var(--pitch-line) 15%, transparent); }
 
-/* Players ease to their spots and the ball glides between event coordinates, so nothing teleports. */
+/* Markers are moved every animation frame by the motion engine in Pitch.jsx, so nothing teleports. */
 .player, .ball { position: absolute; transform: translate(-50%, -50%); }
 .player {
   display: grid;
@@ -240,7 +272,6 @@ button, select { font: inherit; color: inherit; }
   font-size: max(8px, 1.2cqw);
   font-weight: 700;
   box-shadow: 0 2px 6px var(--shadow);
-  transition: left 0.4s ease-out, top 0.4s ease-out;
 }
 .player.on-ball { z-index: 1; box-shadow: 0 0 0 3px var(--pitch-line); }
 .ball {
@@ -250,7 +281,21 @@ button, select { font: inherit; color: inherit; }
   background: var(--ball);
   box-shadow: 0 0 6px var(--ball);
   z-index: 2;
-  transition: left 0.6s ease-in-out, top 0.6s ease-in-out;
+}
+/* Goals: a short pulse in the net (motion.js marks the side). The engine moves markers every frame, so no
+   CSS transitions on left/top. */
+.net {
+  position: absolute;
+  width: 2%;
+  height: 10.3%; /* 7.32 m of the 71 m box */
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.net.pulse { animation: net-pulse 0.9s ease-out; }
+@keyframes net-pulse {
+  0% { background: color-mix(in srgb, var(--pitch-line) 85%, transparent); box-shadow: 0 0 18px var(--pitch-line); }
+  100% { background: transparent; box-shadow: none; }
 }
 
 /* Chips name the moment type; goals and big chances stand out. */
@@ -282,7 +327,8 @@ button, select { font: inherit; color: inherit; }
 }
 .overlay.goal, .overlay.p5 { border-left-color: var(--warning); }
 .overlay header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.overlay h2 { margin-bottom: 4px; font-size: 22px; line-height: 1.25; }
+.overlay h2 { margin-bottom: 4px; font-family: var(--font-display); font-size: 30px; font-weight: 700; line-height: 1.05; }
+.overlay [lang="ar"] h2 { font-family: inherit; font-size: 22px; line-height: 1.45; }
 .overlay p { font-size: 15px; line-height: 1.45; }
 .overlay .why { margin-top: 4px; color: var(--text-muted); }
 @keyframes slide-in { from { opacity: 0; transform: translateY(12px); } }
@@ -290,16 +336,18 @@ button, select { font: inherit; color: inherit; }
 /* Feed cards, newest first. */
 .feed { display: flex; flex-direction: column; gap: 10px; }
 .card {
-  padding: 12px 14px;
+  padding: 16px 18px;
   border: 1px solid var(--border);
-  border-left: 4px solid var(--accent);
-  border-radius: 10px;
+  border-left: 5px solid var(--club, var(--accent));
+  border-radius: 12px;
   background: var(--surface);
+  box-shadow: var(--raise), inset 2px 0 0 var(--club-2, transparent);
   animation: slide-in 0.35s ease-out;
 }
-.card.goal { border-left-color: var(--warning); }
+.feed { gap: 14px; }
 .card header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.card h3 { margin-bottom: 4px; font-size: 16px; line-height: 1.3; }
+.card h3 { margin-bottom: 6px; font-family: var(--font-display); font-size: 22px; font-weight: 700; line-height: 1.1; }
+.card [lang="ar"] h3 { font-family: inherit; font-size: 17px; line-height: 1.5; }
 .card p { font-size: 14px; line-height: 1.45; }
 .card .why { margin-top: 4px; color: var(--text-muted); }
 
@@ -333,10 +381,13 @@ button, select { font: inherit; color: inherit; }
 .tabpanel .evidence { background: var(--surface); }
 
 /* Tabs under the pitch. */
-.tabs { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.tabs { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--raise); }
 .tablist { display: flex; gap: 4px; padding: 6px 6px 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
 .tablist button {
-  padding: 10px 14px;
+  padding: 12px 16px;
+  font-family: var(--font-display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
@@ -417,7 +468,7 @@ button, select { font: inherit; color: inherit; }
 
 /* Match timeline: momentum bars in the club colours (secondary outline, so dark primaries show on dark themes),
    moment markers, the half-time line and the clock. */
-.timeline-card { margin: -4px 0 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+.timeline-card { padding: 14px 16px; border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--raise);
   background: var(--surface); }
 .timeline-plot { position: relative; height: 120px; }
 .timeline-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
@@ -484,38 +535,152 @@ button, select { font: inherit; color: inherit; }
 }
 @media (max-width: 767px) { .timeline-plot { height: 96px; } }
 
-/* "Ask about this match": under the feed; the answer shows its evidence and who answered. */
-.ask { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
-.tabpanel .ask { margin-top: 14px; background: var(--surface-2); }
-.ask form { display: flex; gap: 8px; }
-.ask input {
+
+/* "Ask the match": a column from 1280px, a left drawer from 768px, a full-screen sheet below. One component, so the
+   conversation survives a resize; App.jsx makes it inert whenever it is closed off-screen. */
+.chat-dock { min-width: 0; }
+@media (min-width: 1280px) {
+  .chat-dock { position: sticky; top: 92px; height: calc(100vh - 116px); }
+  .ask-open, .ask-fab { display: none; }
+}
+@media (max-width: 1279px) {
+  .chat-dock {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    width: min(420px, 92vw);
+    padding: 16px;
+    background: var(--bg);
+    box-shadow: 0 0 40px var(--shadow);
+    transform: translateX(-105%);
+    transition: transform 0.25s ease-out;
+  }
+  .chat-dock.open { transform: none; }
+  .chat-backdrop { position: fixed; inset: 0; z-index: 25; background: color-mix(in srgb, var(--bg) 60%, transparent); }
+}
+@media (max-width: 767px) {
+  .chat-dock { right: 0; width: auto; padding: 12px; transform: translateY(105%); }
+  .ask-open { display: none; }
+}
+@media (min-width: 768px) { .ask-fab { display: none; } }
+.ask-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  padding: 14px 22px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 8px 24px var(--shadow);
+  cursor: pointer;
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--raise);
+  overflow: hidden;
+}
+.chat-head { display: flex; align-items: center; gap: 10px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.chat-head > div { flex: 1; min-width: 0; }
+.chat-head h2 { font-family: var(--font-display); font-size: 24px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 0.03em; line-height: 1; }
+.chat-until { margin-top: 4px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.chat-head button { border: 1px solid var(--border); border-radius: 8px; background: transparent; padding: 6px 10px;
+  font-size: 12px; font-weight: 600; cursor: pointer; }
+.chat-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 18px; }
+.chat-empty p { color: var(--text-muted); font-size: 14px; line-height: 1.5; }
+.starters { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.starters button {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  text-align: left;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.starters button:hover { border-color: var(--accent); }
+.bubble { max-width: 92%; padding: 12px 14px; border-radius: 14px; font-size: 14px; line-height: 1.5;
+  animation: slide-in 0.25s ease-out; }
+.bubble.user { align-self: flex-end; background: var(--accent); color: var(--on-accent); border-bottom-right-radius: 4px; }
+.bubble.assistant { align-self: flex-start; background: var(--surface-2); border-bottom-left-radius: 4px; }
+.bubble.declined { border: 1px dashed var(--border); }
+.bubble.notice { align-self: center; background: transparent; color: var(--warning); font-size: 13px; text-align: center; }
+.used { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; font-size: 12px;
+  color: var(--text-muted); }
+.used span { padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  color: var(--accent); font-weight: 600; }
+.typing { display: flex; gap: 5px; padding: 14px 16px; }
+.typing span { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); animation: pulse 1s ease-in-out infinite; }
+.typing span:nth-child(2) { animation-delay: 0.15s; }
+.typing span:nth-child(3) { animation-delay: 0.3s; }
+.chat-input { display: flex; gap: 10px; padding: 14px 16px; border-top: 1px solid var(--border); }
+.chat-input textarea {
   flex: 1;
   min-width: 0;
-  padding: 8px 10px;
+  resize: none;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--surface-2);
   color: var(--text);
   font: inherit;
   font-size: 14px;
 }
-.ask form button {
-  padding: 8px 14px;
+.chat-input button {
+  align-self: flex-end;
+  padding: 10px 16px;
   border: 0;
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--accent);
   color: var(--on-accent);
-  font: inherit;
-  font-size: 14px;
+  font-family: var(--font-display);
+  font-size: 18px;
   font-weight: 700;
+  text-transform: uppercase;
   cursor: pointer;
 }
-.ask input:disabled, .ask form button:disabled { opacity: 0.6; cursor: wait; }
-.ask-about { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--text-muted); }
-.ask-about span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ask-about button { border: 0; background: none; cursor: pointer; font-size: 14px; }
-.ask-answer { margin-top: 10px; }
-.ask-answer p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; }
-.ask-error { margin: 8px 0 0; font-size: 13px; color: var(--warning); }
-.source.declined { border-style: dashed; }
-.how button + button { margin-left: 0; }
+.chat-input textarea:disabled, .chat-input button:disabled, .starters button:disabled { opacity: 0.55; cursor: wait; }
+
+/* Stat cards in answers: built by the server from tool results. */
+.stat-card { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--border); border-left: 4px solid var(--accent);
+  border-radius: 10px; background: var(--surface); box-shadow: 0 1px 2px var(--shadow-soft); }
+.stat-card figcaption { margin-bottom: 8px; font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.03em; }
+.stat-card small { color: var(--text-muted); font-weight: 500; }
+.stat-card dl { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin: 0; }
+.stat-card.moments dl { grid-template-columns: 1fr; gap: 4px; }
+.stat-card dl div { display: flex; flex-direction: column; gap: 2px; }
+.stat-card.moments dl div { flex-direction: row; justify-content: space-between; gap: 10px; }
+.stat-card dt { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-card.moments dt { font-size: 12px; text-transform: none; letter-spacing: 0; }
+.stat-card dd { margin: 0; font-family: var(--font-display); font-size: 22px; font-weight: 700; line-height: 1.1; }
+.stat-card.moments dd { font-family: inherit; font-size: 13px; font-weight: 600; text-align: end; }
+.stat-card ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+.stat-card.ranking li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; font-size: 13px; }
+.stat-card.ranking .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stat-card.ranking .value { grid-row: 1; grid-column: 2; font-family: var(--font-display); font-size: 18px;
+  font-weight: 700; white-space: nowrap; }
+.stat-card.ranking .bar { grid-column: 1 / -1; height: 6px; border-radius: 3px;
+  background: linear-gradient(to right, var(--accent) var(--share), var(--surface-2) var(--share)); }
+.stat-card table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.stat-card th, .stat-card td { padding: 5px 4px; text-align: end; }
+.stat-card th[scope="row"] { text-align: start; font-weight: 500; color: var(--text-muted); }
+.stat-card thead th { font-size: 12px; }
+.stat-card td { font-family: var(--font-display); font-size: 18px; font-weight: 700; white-space: nowrap; }
+.stat-card tbody tr + tr { border-top: 1px solid var(--border); }

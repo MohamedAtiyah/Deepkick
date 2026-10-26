@@ -1,6 +1,13 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { clockMs } from "./live.js";
 import { LABEL, Text } from "./OverlayStack.jsx";
+import league from "../../data/league.json";
+
+// A card's edge takes the club colours of the player it is about (match-wide moments keep the accent).
+const CLUB_OF = Object.fromEntries(league.clubs.flatMap((club) =>
+  [...club.starters, ...club.bench].map((p) => [p.name, club.colours])));
+const edge = (player) => CLUB_OF[player] && { "--club": CLUB_OF[player].primary,
+                                               "--club-2": CLUB_OF[player].secondary };
 
 export const SOURCE = { model: "AI-explained", template: "Stats template" };
 
@@ -13,15 +20,14 @@ export const EvidenceList = ({ evidence, lang, dir, ...props }) => (
   </dl>
 );
 
-/** Who wrote the card, an "Ask about this" button, and a collapsible list of the facts it cites. */
-function HowWeKnow({ payload, lang, dir, onAsk }) {
+/** An "AI-explained" badge when the model wrote the card, and a collapsible list of the facts it cites. */
+function HowWeKnow({ payload, lang, dir }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
     <>
       <div className="how">
-        <span className={`source ${payload.source}`}>{SOURCE[payload.source]}</span>
-        {onAsk && <button onClick={onAsk}>Ask about this</button>}
+        {payload.source === "model" && <span className="source model">{SOURCE.model}</span>}
         {payload.evidence.length > 0 && (
           <button aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>How we know</button>
         )}
@@ -32,7 +38,7 @@ function HowWeKnow({ payload, lang, dir, onAsk }) {
 }
 
 /** Every overlay whose moment has come, newest first: full cards, or one line each when `compact`. */
-export default function Feed({ overlays, matchClock, lang, compact = false, selected = null, onAsk = null }) {
+export default function Feed({ overlays, matchClock, lang, compact = false, selected = null }) {
   const list = useRef(null);
   useEffect(() => {
     const card = list.current?.querySelector(".selected");
@@ -62,14 +68,15 @@ export default function Feed({ overlays, matchClock, lang, compact = false, sele
         </ol>
       ) : (
         items.map(([key, o]) => (
-          <article key={key} className={`card ${o.type}${key === selected ? " selected" : ""}`}>
+          <article key={key} className={`card ${o.type}${key === selected ? " selected" : ""}`}
+                   style={edge(o.payload.player)}>
             <header>{chip(o)}<span className="minute">{o.match_clock}</span></header>
             <div lang={lang} dir={dir}>
               <h3><Text>{o.payload.headline}</Text></h3>
               <p><Text>{o.payload.detail}</Text></p>
               <p className="why"><Text>{o.payload.why}</Text></p>
             </div>
-            <HowWeKnow payload={o.payload} lang={lang} dir={dir} onAsk={onAsk && (() => onAsk(o))} />
+            <HowWeKnow payload={o.payload} lang={lang} dir={dir} />
           </article>
         ))
       )}
