@@ -68,6 +68,7 @@ Overlay (one JSON object per WebSocket message):
 `overlay_id, type, match_clock, show_at_ms, duration_ms, priority, persona, lang, payload{player, headline, detail, why, evidence[{label, value}], source}`
 
 `source` is `model` or `template`; `evidence` is the numeric moment facts the text cites, values copied from the facts.
+`lang` is the language the text is actually in: `en` when an Arabic translation was not usable (`overlay_id` keeps the language asked for). Player and club names stay in English in every language.
 
 Change a contract only together with its producer, its consumers and its tests.
 

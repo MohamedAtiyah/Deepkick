@@ -2,51 +2,47 @@
 
 import json
 import logging
+import re
 
 import httpx
 import pytest
 
 from deepkick.agents.persona import template_versions
-from deepkick.agents.translate import Translator, protect, translate_url, translate_versions, unprotect
+from deepkick.agents.translate import (_NAME, Translator, placeholder, protect, translate_recap, translate_url,
+                                       translate_versions, unprotect)
 from deepkick.contracts import PERSONAS
 
 URL = "https://api.cognitive.microsofttranslator.com"
-ARABIC = "ترجمة: "  # the fake Translator's "Arabic": a prefix on the protected HTML it was sent
+ARABIC = "ترجمة: "  # the fake Translator's "Arabic": a prefix, and every Latin letter outside a protected span
+_SPANNED = re.compile(r"(<span[^>]*>.*?</span>)")
+_LATIN_WORD = re.compile(r"[A-Za-z]+(?:-[A-Za-z]+)*")
 
 
-def spell(name):
-    """The fake transliteration: each Latin letter becomes an Arabic letter, so a name is all Arabic script."""
-    return "".join(chr(0x0627 + (ord(c.lower()) - ord("a")) % 20) if c.isalpha() else c for c in name)
+def arabize(markup):
+    """The fake translation: Latin letters outside notranslate spans become Arabic ones; spans and entities stay."""
+    turn = lambda m: m.group(0) if m.group(0).startswith("&") else chr(0x0627 + ord(m.group(0).lower()) % 20)  # noqa: E731
+    return "".join(part if _SPANNED.fullmatch(part) else re.sub(r"&\w+;|[A-Za-z]", turn, part)
+                   for part in _SPANNED.split(markup))
 
 
-STUCK = "Fenn Grimsdyke"  # the live service hands this full name back unchanged; word by word it spells it
-
-
-def transliterated(request: httpx.Request) -> httpx.Response | None:
-    """The fake Translator's answer to a transliterate request, or None for any other request."""
-    if not request.url.path.endswith("/transliterate"):
-        return None
-    return httpx.Response(200, json=[{"text": item["Text"] if item["Text"] == STUCK else spell(item["Text"]),
-                                      "script": "Arab"} for item in json.loads(request.content)])
-
-
-def as_arabic(text, translator):
-    """What the fake Translator makes of `text`: names in Arabic script, glossary terms, the ARABIC prefix."""
-    return unprotect(ARABIC + protect(text, translator.names_for("ar"), glossary=True))
+def as_arabic(text, translator=None):
+    """What the fake Translator makes of `text`: Arabic words and glossary terms, English names, the ARABIC prefix."""
+    markup, names = protect(text, glossary=True)
+    return unprotect(ARABIC + arabize(markup), names)
 
 
 def fake_translator(change=lambda text: text, fail=None):
-    """A Translator whose HTTP calls are answered in-process; `requests` records every translate call's texts."""
+    """A Translator whose HTTP calls are answered in-process; `requests` records every translate call's texts.
+
+    `change` edits each text the Translator was sent before it is "translated" (to lose a number or a name)."""
     requests = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        if (spelled := transliterated(request)) is not None:
-            return spelled
         texts = [item["Text"] for item in json.loads(request.content)]
         requests.append({"texts": texts, "params": dict(request.url.params), "headers": request.headers})
         if fail:
             raise fail
-        return httpx.Response(200, json=[{"translations": [{"text": ARABIC + change(t), "to": "ar"}]}
+        return httpx.Response(200, json=[{"translations": [{"text": ARABIC + arabize(change(t)), "to": "ar"}]}
                                          for t in texts])
 
     translator = Translator("test-key", "uaenorth", URL, client=httpx.Client(transport=httpx.MockTransport(handler)))
@@ -68,7 +64,7 @@ def big_chance(detected):
     return next(m for m, _ in detected if m["type"] == "big_chance")
 
 
-def test_arabic_comes_back_in_one_batched_call_with_names_in_arabic_script(goal):
+def test_arabic_comes_back_in_one_batched_call_with_names_in_english(goal):
     translator, requests = fake_translator()
     english = template_versions(goal)
     arabic = translate_versions(english, translator, "ar", goal["event_id"])
@@ -77,7 +73,9 @@ def test_arabic_comes_back_in_one_batched_call_with_names_in_arabic_script(goal)
     assert len(requests) == 1 and len(requests[0]["texts"]) <= 9 + len(labels)
     assert requests[0]["params"] == {"api-version": "3.0", "to": "ar", "textType": "html"}
     assert requests[0]["headers"]["ocp-apim-subscription-key"] == "test-key"
-    assert any(f'<span class="notranslate">{spell("Rafe Ironsby")}</span>' in t for t in requests[0]["texts"])
+    # Names go to the Translator as placeholders, never as text it could translate or transliterate.
+    assert any(f'<span class="notranslate">{placeholder(0)}</span>' in t for t in requests[0]["texts"])
+    assert not any("Ironsby" in t or "Calderbrook" in t for t in requests[0]["texts"])
     for persona in PERSONAS:
         assert arabic[persona]["fallback"] is False
         for field in ("headline", "detail", "why"):
@@ -87,33 +85,62 @@ def test_arabic_comes_back_in_one_batched_call_with_names_in_arabic_script(goal)
                                                                       for e in english[persona]["evidence"]]
         assert [e["value"] for e in arabic[persona]["evidence"]] == [e["value"] for e in english[persona]["evidence"]]
     headline = arabic["player"]["headline"]
-    assert spell("Rafe Ironsby") in headline and "Rafe" not in headline and "<span" not in headline
+    assert "Rafe Ironsby" in headline and "ZQ" not in headline and "<span" not in headline
 
 
-def test_names_are_transliterated_once_club_codes_stay_and_a_failure_keeps_latin(goal, monkeypatch):
+def _english_words(text):
+    """The Latin-script words in a text."""
+    return _LATIN_WORD.findall(text)
+
+
+def test_every_roster_name_stays_in_english_in_every_arabic_overlay_and_recap(detected):
     translator, _ = fake_translator()
-    names = translator.names_for("ar")
-    assert names["Calderbrook Athletic"] == spell("Calderbrook Athletic") and "ASH" not in names
-    assert names[STUCK] == f"{spell('Fenn')} {spell('Grimsdyke')}"  # retried word by word
-    assert translator.names_for("ar") is names and translator.names_for("en") == {}  # cached; English untouched
-    calls = []
+    for moment, _ in detected:
+        english = template_versions(moment)
+        arabic = translate_versions(english, translator, "ar", moment["event_id"])
+        texts = [(english[p][k], arabic[p][k]) for p in PERSONAS for k in ("headline", "detail", "why")]
+        texts += [(e["label"], a["label"]) for p in PERSONAS
+                  for e, a in zip(english[p]["evidence"], arabic[p]["evidence"])]
+        for source, translated in texts:
+            names = _NAME.findall(source)
+            assert all(n in translated for n in names), (source, translated)
+            # Everything else became Arabic: the only English words left are the names.
+            assert set(_english_words(translated)) <= {w for n in names for w in n.split()}, translated
+    recap = {p: {"text": "Full-time: Ashvale Wanderers 3-5 Calderbrook Athletic. Rafe Ironsby's double led them.",
+                 "fallback": False} for p in PERSONAS}
+    for p, version in translate_recap(recap, translator, "ar", "e").items():
+        assert not version["fallback"] and all(n in version["text"] for n in
+                                               ("Ashvale Wanderers", "Calderbrook Athletic", "Rafe Ironsby"))
 
-    def down(request):
-        calls.append(request.url.path)
-        return httpx.Response(503)
 
-    broken = Translator("k", "r", URL, client=httpx.Client(transport=httpx.MockTransport(down)))
-    assert broken.names_for("ar") == {} and broken.names_for("ar") == {}
-    assert calls == ["/transliterate"]  # not retried on every translation
-    assert protect("Rafe Ironsby", {}) == '<span class="notranslate">Rafe Ironsby</span>'  # Latin, as before
+def test_possessives_keep_the_english_name_and_leave_the_s_to_the_translator():
+    markup, names = protect("Rafe Ironsby's shot and Ironsby’s finish")
+    assert names == ["Rafe Ironsby", "Ironsby"]
+    assert "</span>'s" in markup and "</span>’s" in markup  # the possessive is grammar for the Translator
+    arabic = as_arabic("It was Ironsby's goal.")
+    assert "Ironsby" in arabic and "'s" not in arabic
+
+
+def test_a_lost_name_placeholder_falls_back_to_english_for_that_version(goal, caplog):
+    english = template_versions(goal)
+    lost = f'<span class="notranslate">{placeholder(0)}</span>'
+    translator, _ = fake_translator(change=lambda t: t.replace(lost, "", 1) if t.startswith(lost) and " lead " in t
+                                    else t)
+    with caplog.at_level(logging.WARNING, logger="deepkick.translate"):
+        arabic = translate_versions(english, translator, "ar", goal["event_id"])
+    assert english["casual"]["headline"].startswith("Rafe Ironsby scores")
+    assert arabic["casual"] == _english(english["casual"]) | {"fallback": True}
+    assert arabic["analyst"]["fallback"] is False
+    assert "a name placeholder was lost" in caplog.text
+    assert unprotect(f"{ARABIC}{placeholder(0)} {placeholder(0)}", ["Rafe Ironsby"]) is None  # doubled is lost too
 
 
 def test_football_terms_go_in_already_translated():
-    sent = protect("Full-time: Ashvale had 13 shots.", glossary=True)
+    sent, _ = protect("Full-time: Ashvale had 13 shots.", glossary=True)
     kept = lambda words: f'<span class="notranslate">{words}</span>'  # noqa: E731
     assert kept("نهاية المباراة") in sent and kept("تسديدات") in sent
     assert "shots" not in sent and "Full-time" not in sent
-    assert "shots" in protect("Ashvale had 13 shots.")  # English and other languages are not changed
+    assert "shots" in protect("Ashvale had 13 shots.")[0]  # English and other languages are not changed
 
 
 def test_english_passes_through_with_no_call(goal):
@@ -138,8 +165,8 @@ def test_the_cache_prevents_repeat_calls(goal, big_chance):
 def test_a_dropped_number_falls_back_to_english_for_that_version(goal, caplog):
     english = template_versions(goal)
     target = english["casual"]["headline"]  # "Rafe Ironsby scores, Calderbrook lead 1-0"
-    dropped = '<span class="notranslate">1</span>'  # the Translator "loses" the 1 of "1-0"
-    translator, _ = fake_translator(change=lambda t: t.replace(dropped, "", 1) if " lead " in t else t)
+    dropped = '<span class="notranslate">1</span>-'  # the Translator "loses" the 1 of "1-0"
+    translator, _ = fake_translator(change=lambda t: t.replace(dropped, "-", 1) if " lead " in t else t)
     with caplog.at_level(logging.INFO, logger="deepkick.translate"):
         arabic = translate_versions(english, translator, "ar", goal["event_id"])
     assert "1-0" in target
@@ -177,11 +204,12 @@ def test_a_malformed_reply_falls_back_too(goal):
 
 
 def test_names_are_protected_and_restored():
-    sent = protect("Rafe Ironsby scores, Calderbrook lead 1-0 & ASH 0-1 CAL")
+    sent, names = protect("Rafe Ironsby scores, Calderbrook lead 1-0 & ASH 0-1 CAL")
     n = lambda text: f'<span class="notranslate">{text}</span>'  # noqa: E731
-    assert sent == (f"{n('Rafe Ironsby')} scores, {n('Calderbrook')} lead {n('1')}-{n('0')} &amp; "
-                    f"{n('ASH')} {n('0')}-{n('1')} {n('CAL')}")
-    assert unprotect(sent) == "Rafe Ironsby scores, Calderbrook lead 1-0 & ASH 0-1 CAL"
+    p = placeholder
+    assert sent == (f"{n(p(0))} scores, {n(p(1))} lead {n('1')}-{n('0')} &amp; {n(p(2))} {n('0')}-{n('1')} {n(p(3))}")
+    assert names == ["Rafe Ironsby", "Calderbrook", "ASH", "CAL"]
+    assert unprotect(sent, names) == "Rafe Ironsby scores, Calderbrook lead 1-0 & ASH 0-1 CAL"
 
 
 def test_a_dropped_space_beside_a_protected_name_is_restored():
@@ -189,8 +217,9 @@ def test_a_dropped_space_beside_a_protected_name_is_restored():
     returned = 'هذه هي أسرع جولة <span class="notranslate">Calderbrook Athletic</span>حتى الآن.'
     assert unprotect(returned) == "هذه هي أسرع جولة Calderbrook Athletic حتى الآن."
     assert unprotect("<span>Rafe Ironsby</span>تجري بسرعة") == "Rafe Ironsby تجري بسرعة"
-    # Seen live once names were in Arabic script: the name run into the next Arabic word ("أولابيفي").
-    assert unprotect('هدف <span class="notranslate">أولابي</span>في المباراة') == "هدف أولابي في المباراة"
+    # Seen live: a protected span run into the next Arabic word.
+    assert unprotect(f'هدف <span class="notranslate">{placeholder(0)}</span>في المباراة',
+                     ["Lucan Ullaby"]) == "هدف Lucan Ullaby في المباراة"
     # Also seen live: a number run into the next name ("17Calderbrook").
     assert unprotect('على <span class="notranslate">17</span>Calderbrook.') == "على 17 Calderbrook."
     assert unprotect("سجل 2-3 و 9.2 م") == "سجل 2-3 و 9.2 م"  # scores and decimals are left alone
@@ -222,8 +251,6 @@ def test_a_429_backs_off_without_using_up_an_attempt(goal, monkeypatch):
     monkeypatch.setattr(narrative, "_sleep", waits.append)
 
     def handler(request):
-        if (spelled := transliterated(request)) is not None:
-            return spelled
         if replies:
             return replies.pop(0)
         texts = [item["Text"] for item in json.loads(request.content)]

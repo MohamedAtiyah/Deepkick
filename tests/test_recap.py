@@ -8,7 +8,8 @@ import pytest
 
 from deepkick.agents.narrative import NarrativeAgent
 from deepkick.agents.persona import PersonaAgent
-from deepkick.agents.recap import SYSTEM_PROMPT, RecapAgent, check_recap, goals, recap_inputs, template_recap
+from deepkick.agents.recap import (SYSTEM_PROMPT, RecapAgent, check_recap, goals, recap_inputs, select_recap,
+                                   template_recap)
 from deepkick.contracts import PERSONAS
 from deepkick.orchestrator import Orchestrator, replay_events
 from deepkick.simulator import clock_seconds
@@ -150,3 +151,14 @@ def test_catch_up_headlines_follow_the_viewers_persona(finished):
     analyst = finished.catch_up("analyst", "en", 30, at="45:00")["moments"]
     assert [m["match_clock"] for m in casual] == [m["match_clock"] for m in analyst]
     assert [m["headline"] for m in casual] != [m["headline"] for m in analyst]
+
+
+def test_an_untranslated_recap_is_served_in_english_marked_as_english(finished):
+    record = finished._recaps[-1]
+    english = select_recap(record, "casual", "ar")
+    assert english["lang"] == "en" and english["text"] == record["versions"]["casual"]["text"]  # no Translator here
+    lost = record | {"translations": {"ar": {p: {"text": "نص", "fallback": True} for p in PERSONAS}}}
+    assert select_recap(lost, "casual", "ar")["lang"] == "en"
+    done = record | {"translations": {"ar": {p: {"text": "نص", "fallback": False} for p in PERSONAS}}}
+    shown = select_recap(done, "casual", "ar")
+    assert (shown["lang"], shown["text"]) == ("ar", "نص")

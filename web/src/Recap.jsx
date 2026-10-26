@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Text } from "./OverlayStack.jsx";
+import { Text, Untranslated, dirOf } from "./OverlayStack.jsx";
 
 /** The half-time and full-time recaps for the current persona and language, refreshed every 5 seconds. */
 export default function Recap({ persona, lang }) {
@@ -28,7 +28,8 @@ export default function Recap({ persona, lang }) {
             <span className="chip">{r.type === "half_time" ? "Half-time" : "Full-time"}</span>
             <span className="minute">{r.match_clock}</span>
           </header>
-          <p lang={lang} dir={lang === "ar" ? "rtl" : "ltr"}><Text>{r.text}</Text></p>
+          <p lang={r.lang} dir={dirOf(r.lang)}><Text>{r.text}</Text></p>
+          <Untranslated wanted={lang} got={r.lang} />
         </article>
       ))}
     </section>

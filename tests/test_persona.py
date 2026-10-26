@@ -456,3 +456,16 @@ def test_every_fact_key_has_a_readable_label(narrated):
     assert fact_label("distance_m", "goal") == "Shot distance (m)"
     assert fact_label("distance_m", "distance_milestone") == "Distance covered (m)"
     assert {"passes", "passes_completed", "pass_accuracy_pct"} <= FACT_LABELS.keys()  # pass milestones: not in seed 42
+
+
+def test_an_untranslated_version_ships_in_english_marked_as_english(goal):
+    moment, _ = goal
+    versions = template_versions(moment)
+    profile = _profile("casual") | {"lang": "ar"}
+    assert select_overlay(moment, versions, profile)["lang"] == "en"  # no translation made
+    arabic = {p: versions[p] | {"headline": "عنوان", "fallback": False} for p in PERSONAS}
+    shown = select_overlay(moment, versions | {"translations": {"ar": arabic}}, profile)
+    assert shown["lang"] == "ar" and shown["payload"]["headline"] == "عنوان"
+    lost = {p: versions[p] | {"fallback": True} for p in PERSONAS}  # a name or number was lost: English
+    shown = select_overlay(moment, versions | {"translations": {"ar": lost}}, profile)
+    assert shown["lang"] == "en" and shown["overlay_id"].endswith("-casual-ar")

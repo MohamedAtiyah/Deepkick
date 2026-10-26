@@ -232,3 +232,22 @@ def test_arabic_answers_and_cards_keep_every_number(api):
     assert out["answer"] == as_arabic("Rafe Ironsby scored at 13:52.", translator) and out["source"] == "model"
     assert out["cards"][0]["title"] == as_arabic("Goals", translator)
     assert out["cards"][0]["rows"][0]["label"] == as_arabic("13:52 CAL", translator)
+
+
+def test_arabic_answers_keep_every_roster_name_in_english_or_fall_back_to_english(api):
+    from deepkick.agents.translate import placeholder
+    from tests.test_translate import fake_translator
+
+    said = "Caius Mossington's goals put Calderbrook Athletic ahead of Ashvale, and CAL kept the lead."
+    translator, _ = fake_translator()
+    client, _ = api([("goals", {})], said, translator=translator)
+    out = _post(client, _ask("Who scored most?"), lang="ar").json()
+    assert out["lang"] == "ar" and out["answer"].startswith("ترجمة")
+    for name in ("Caius Mossington", "Calderbrook Athletic", "Ashvale", "CAL"):
+        assert name in out["answer"]
+    # The Translator loses a name: the whole answer stays in English, marked as English for the note.
+    lost = f'<span class="notranslate">{placeholder(0)}</span>'
+    translator, _ = fake_translator(change=lambda t: t.replace(lost, "", 1))
+    client, _ = api([("goals", {})], said, translator=translator)
+    out = _post(client, _ask("Who scored most?"), lang="ar").json()
+    assert out["lang"] == "en" and out["answer"] == said

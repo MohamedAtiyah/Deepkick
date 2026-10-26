@@ -206,8 +206,7 @@ class ChatAgent:
                "source": "model" if answer else "declined"}
         if failure:
             log.warning("stage=chat declined: %s", failure)
-        if lang != "en":
-            out = translate_reply(out, translator, lang)
+        out = translate_reply(out, translator, lang) if lang != "en" else out | {"lang": "en"}
         log.info("stage=chat persona=%s lang=%s duration_ms=%.0f tools_used=%s fallback=%s", persona, lang,
                  (time.monotonic() - start) * 1000, ",".join(out["tools_used"]) or "none", "yes" if failure else "no")
         return out
@@ -258,11 +257,12 @@ class ChatAgent:
 
 
 def translate_reply(out: dict[str, Any], translator: Translator | None, lang: str) -> dict[str, Any]:
-    """The answer, card titles and row labels in `lang` in one batch; the English stays if a number would change."""
+    """The answer, card titles and row labels in `lang` in one batch, with `lang` set to the reply's language; the
+    English stays (and `lang` is "en") if a name or number would be lost or changed."""
     texts = [out["answer"]] + [c["title"] for c in out["cards"]] + [r["label"] for c in out["cards"] for r in c["rows"]]
     translated = translate_batch(texts, translator, lang, None)
     if translated is None or not all(same_numbers(t, translated[t]) for t in texts):
-        return out
-    return out | {"answer": translated[out["answer"]], "cards": [
+        return out | {"lang": "en"}
+    return out | {"lang": lang, "answer": translated[out["answer"]], "cards": [
         c | {"title": translated[c["title"]], "rows": [r | {"label": translated[r["label"]]} for r in c["rows"]]}
         for c in out["cards"]]}

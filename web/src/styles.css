@@ -661,3 +661,6 @@ button, select { font: inherit; color: inherit; }
 .stat-card thead th { font-size: 12px; }
 .stat-card td { font-family: var(--font-display); font-size: 18px; font-weight: 700; white-space: nowrap; }
 .stat-card tbody tr + tr { border-top: 1px solid var(--border); }
+
+/* Shown when Arabic was asked for but the text came back in English. */
+.untranslated { display: block; margin-top: 6px; color: var(--text-muted); font-size: 12px; }

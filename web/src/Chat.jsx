@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import league from "../../data/league.json";
-import { Text } from "./OverlayStack.jsx";
+import { Text, Untranslated, dirOf } from "./OverlayStack.jsx";
 
 const MAX_CHARS = 300; // the server's limit per message
 const HISTORY = 6; // messages the server keeps
@@ -110,7 +110,7 @@ export default function Chat({ profile, clock, docked, open, onClose }) {
       });
       const body = await response.json().catch(() => ({}));
       if (response.ok) {
-        setMessages((m) => [...m, { role: "assistant", content: body.answer, lang: profile.lang, cards: body.cards,
+        setMessages((m) => [...m, { role: "assistant", content: body.answer, lang: body.lang ?? "en", wanted: profile.lang, cards: body.cards,
                                      tools: body.tools_used, source: body.source, until: body.data_until_clock }]);
       } else {
         const notice = response.status === 429 ? body.detail : PROBLEM[response.status] ?? PROBLEM.other;
@@ -155,11 +155,12 @@ export default function Chat({ profile, clock, docked, open, onClose }) {
         )}
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}${m.source === "declined" ? " declined" : ""}`}>
-            <p lang={m.lang} dir={m.lang === "ar" ? "rtl" : "ltr"}><Text>{m.content}</Text></p>
+            <p lang={m.lang} dir={dirOf(m.lang)}><Text>{m.content}</Text></p>
+            {m.role === "assistant" && <Untranslated wanted={m.wanted} got={m.lang} />}
             {m.tools?.length > 0 && (
               <p className="used">Used: {m.tools.map((t) => <span key={t}>{TOOL_LABEL[t] ?? t}</span>)}</p>
             )}
-            {m.cards?.map((card, j) => <Card key={j} card={card} dir={m.lang === "ar" ? "rtl" : "ltr"} />)}
+            {m.cards?.map((card, j) => <Card key={j} card={card} dir={dirOf(m.lang)} />)}
           </div>
         ))}
         {busy && (

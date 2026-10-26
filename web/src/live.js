@@ -99,13 +99,15 @@ export function useSmoothClock(state) {
   return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
 }
 
-// In right-to-left text a score like "1-0" after an Arabic word displays reversed ("0-1"): the hyphen does not join
-// Arabic-context numbers into one run the way "." does. Split scores out so the view can isolate them LTR.
-const SCORE = /(\d+(?:\.\d+)?(?:\s?[-–]\s?\d+(?:\.\d+)?)+)/;
+// In right-to-left text an English name, a score ("1-0" displays as "0-1") or a clock next to Arabic words is
+// reordered by the bidi algorithm. A run of Latin letters and digits, joined across spaces and inner punctuation,
+// is split out so the view can isolate it left-to-right. A run never ends in punctuation, so a full stop or comma
+// after a name stays in the Arabic sentence.
+const LTR = /([A-Za-z0-9](?:[A-Za-z0-9]|\s?[-–]\s?(?=\d)|[\s'’.:](?=[A-Za-z0-9])|(?<=\d),(?=\d))*)/;
 
-/** The text as [part, isScore] pairs, scores (hyphenated number groups) marked so they can render left-to-right. */
-export function splitScores(text) {
-  return text.split(SCORE).filter(Boolean).map((part) => [part, SCORE.test(part) && /^\d/.test(part)]);
+/** The text as [part, isLtr] pairs: names, numbers, scores and clocks marked so they can render left-to-right. */
+export function splitLtr(text) {
+  return text.split(LTR).filter(Boolean).map((part) => [part, /^[A-Za-z0-9]/.test(part)]);
 }
 
 // At replay speed each lower-third holds the screen for many match minutes, so the queue falls behind the clock.

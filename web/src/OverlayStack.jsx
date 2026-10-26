@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import { clockMs, dueOverlays, splitScores } from "./live.js";
+import { clockMs, dueOverlays, splitLtr } from "./live.js";
 
-/** Text with every score isolated left-to-right, so "1-0" never displays as "0-1" in Arabic. */
+/** Text with every English name, number, score and clock isolated left-to-right, so in Arabic "1-0" never
+ *  displays as "0-1" and punctuation never jumps across a name. */
 export const Text = ({ children }) =>
-  splitScores(children).map(([part, isScore], i) => (isScore ? <bdi key={i} dir="ltr">{part}</bdi> : part));
+  splitLtr(children).map(([part, isLtr], i) => (isLtr ? <bdi key={i} dir="ltr">{part}</bdi> : part));
+
+export const dirOf = (lang) => (lang === "ar" ? "rtl" : "ltr");
+
+/** A small note when text asked for in `wanted` came back in English (`got`): the translation was not usable. */
+export const Untranslated = ({ wanted, got }) =>
+  wanted !== got ? <small className="untranslated" lang="en" dir="ltr">Translation unavailable</small> : null;
 
 const SLOTS = 1; // one lower-third at a time: the highest priority of those due; the rest wait
 const QUEUE = 4; // shortcut: a late viewer's backlog is trimmed to the newest few rather than replayed for minutes
@@ -58,11 +65,12 @@ export default function OverlayStack({ overlays, matchClock, lang }) {
               <span className={`chip ${overlay.type}`}>{LABEL[overlay.type] ?? overlay.type}</span>
               <span className="minute">{overlay.match_clock}</span>
             </header>
-            <div lang={lang} dir={lang === "ar" ? "rtl" : "ltr"}>
+            <div lang={overlay.lang} dir={dirOf(overlay.lang)}>
               <h2><Text>{overlay.payload.headline}</Text></h2>
               <p><Text>{overlay.payload.detail}</Text></p>
               <p className="why"><Text>{overlay.payload.why}</Text></p>
             </div>
+            <Untranslated wanted={lang} got={overlay.lang} />
           </article>
         );
       })}

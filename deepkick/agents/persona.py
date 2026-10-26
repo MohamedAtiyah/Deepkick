@@ -459,7 +459,8 @@ def select_overlay(moment: dict[str, Any], versions: dict[str, Any], profile: di
     persona, lang = profile.get("persona"), profile.get("lang", "en")
     english = version = versions.get(persona) or {}
     if lang != "en":  # the translated version, if the Translator step made one; else the English text ships
-        version = versions.get("translations", {}).get(lang, {}).get(persona) or version
+        translated = versions.get("translations", {}).get(lang, {}).get(persona)
+        version = translated if translated and not translated["fallback"] else english
     overlay = {
         "overlay_id": f"{moment['moment_id']}-{persona}-{lang}",
         "type": moment["type"],
@@ -468,7 +469,7 @@ def select_overlay(moment: dict[str, Any], versions: dict[str, Any], profile: di
         "duration_ms": 8000 if moment["type"] == "goal" else 6000,
         "priority": priority,
         "persona": persona,
-        "lang": lang,
+        "lang": lang if version is not english else "en",  # the language the text is actually in
         "payload": {"player": moment["player"]["name"] if moment["player"] else None,
                     **{k: version.get(k) for k in VERSION_KEYS},
                     "evidence": [{"label": e["label"], "value": e["value"]}
