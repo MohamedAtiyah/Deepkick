@@ -205,7 +205,8 @@ class Orchestrator:
         while True:
             moment, snapshot = await self._queue.get()
             start, record, fallback = time.monotonic(), None, True
-            model = moment["priority"] >= MODEL_MIN_PRIORITY
+            # Without Foundry settings nothing is asked, so it is templated rather than a fallback.
+            model = moment["priority"] >= MODEL_MIN_PRIORITY and self.narrator.client is not None
             try:
                 explain = ExplainExecutor(self.narrator)
                 personalise = PersonaliseExecutor(self.personas, self.translator)

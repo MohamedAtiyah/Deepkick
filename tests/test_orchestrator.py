@@ -138,13 +138,8 @@ def test_each_handoff_and_the_run_summary_are_logged(caplog):
 
 
 def test_cli_replay_needs_no_azure(monkeypatch, capsys):
-    import dotenv
-
     from deepkick.orchestrator import main
 
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)  # never read a developer's real .env here
-    for key in ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY", "EVENTHUB_CONNECTION_STRING"):
-        monkeypatch.delenv(key, raising=False)
     main(["--replay", str(REPLAY_PATH), "--persona", "casual"])
     out, err = capsys.readouterr()
     overlays = [json.loads(line) for line in out.splitlines()]

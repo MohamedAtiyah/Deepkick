@@ -1,6 +1,7 @@
 """Tests for the overlay API with FastAPI's TestClient, the seed-42 replay and a fake model client (no network)."""
 
 import asyncio
+import os
 import threading
 import time
 from types import SimpleNamespace
@@ -15,7 +16,7 @@ from deepkick.api import create_app
 from deepkick.contracts import validate_overlay
 from deepkick.orchestrator import Orchestrator, replay_events
 from deepkick.simulator import clock_seconds
-from tests.conftest import REPLAY_PATH
+from tests.conftest import AZURE_SETTINGS, REPLAY_PATH
 
 TOTAL = 35  # overlays from the seed-42 replay; none are dropped by the cap
 
@@ -124,11 +125,6 @@ def test_websocket_rejects_an_unknown_persona_or_language(finished):
 
 
 def test_default_app_replays_REPLAY_FILE_with_no_azure(monkeypatch):
-    import dotenv
-
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)  # never read a developer's real .env here
-    for key in ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY", "EVENTHUB_CONNECTION_STRING"):
-        monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("REPLAY_FILE", str(REPLAY_PATH))
     monkeypatch.setenv("REPLAY_SPEED", "0")  # unpaced, so the test is fast
     with TestClient(create_app()) as client:
@@ -139,12 +135,27 @@ def test_default_app_replays_REPLAY_FILE_with_no_azure(monkeypatch):
     assert health["summary"]["emitted"] == TOTAL
 
 
-def test_default_app_paces_the_replay_so_state_tracks_the_stream(monkeypatch):
-    import dotenv
+def test_a_default_replay_never_builds_a_foundry_translator_or_speech_client(monkeypatch):
+    import openai
 
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)
-    for key in ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY", "REPLAY_SPEED"):
-        monkeypatch.delenv(key, raising=False)
+    from deepkick.agents.speech import Speech
+    from deepkick.agents.translate import Translator
+
+    assert all(os.environ[key] == "" for key in AZURE_SETTINGS)  # conftest's guard, and "" means not configured
+    built = []
+    monkeypatch.setattr(openai, "OpenAI", lambda *a, **k: built.append("foundry"))
+    monkeypatch.setattr(Translator, "__init__", lambda *a, **k: built.append("translator"))
+    monkeypatch.setattr(Speech, "__init__", lambda *a, **k: built.append("speech"))
+    monkeypatch.setenv("REPLAY_FILE", str(REPLAY_PATH))
+    monkeypatch.setenv("REPLAY_SPEED", "0")
+    with TestClient(create_app()) as client:
+        _wait_until(lambda: client.get("/healthz").json()["status"] == "finished")
+        assert client.get("/healthz").json()["summary"]["model_explained"] == 0
+    assert built == []
+
+
+def test_default_app_paces_the_replay_so_state_tracks_the_stream(monkeypatch):
+    monkeypatch.delenv("REPLAY_SPEED", raising=False)
     monkeypatch.setenv("REPLAY_FILE", str(REPLAY_PATH))
     with TestClient(create_app()) as client:
         time.sleep(1.0)  # 30 match seconds at the default 30x

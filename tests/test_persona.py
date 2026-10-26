@@ -364,14 +364,9 @@ def test_model_inputs_leave_out_ids(goal):
 
 
 def test_cli_prints_valid_overlays_without_calling_a_model(monkeypatch, capsys):
-    import dotenv
-
     from deepkick.agents.persona import main
     from tests.conftest import REPLAY_PATH
 
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda *a, **k: False)  # never read a developer's real .env here
-    for key in ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
     main([str(REPLAY_PATH), "--persona", "player", "--club", "ASH", "--player", "ASH08", "--limit", "8"])
     overlays = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert len(overlays) == 8
