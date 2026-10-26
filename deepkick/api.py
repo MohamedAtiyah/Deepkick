@@ -62,7 +62,6 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         app.state.speech = speech or Speech.from_env()
         app.state.chat = chat or ChatAgent()
         app.state.limiter = limiter or RateLimiter(per_client=6, total=30)
-        app.state.limiter = limiter or RateLimiter()
         stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "30"))) if replay
                             else live_events())
         task = asyncio.create_task(app.state.orchestrator.run(stream))
