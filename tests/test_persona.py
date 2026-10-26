@@ -137,9 +137,6 @@ def test_timeout_falls_back_to_templates_after_one_retry(goal, caplog):
 
 @pytest.mark.parametrize("persona, field, text, problem", [
     ("analyst", "detail", "It was a 0.9 xG chance, the best of the match.", "numbers not in the inputs"),
-    ("analyst", "why", "0.215", "sentence of at least 4 words with a verb"),  # a bare number
-    ("casual", "detail", "Big chance.", "sentence of at least 4 words with a verb"),  # a two-word fragment
-    ("player", "why", "A 0.252 xG chance.", "sentence of at least 4 words with a verb"),  # four words, no verb
     ("player", "why", "It is Rafe Ironsby's 12th goal this season.", "numbers not in the inputs"),
     ("player", "headline", "A cool finish to open the scoring", "player headline must name"),
     ("casual", "headline", "", "non-empty"),
@@ -413,24 +410,6 @@ def test_analyst_voice_has_no_shape_vocabulary():
     analyst = SYSTEM_PROMPT[SYSTEM_PROMPT.index("- analyst:"):SYSTEM_PROMPT.index("- casual:")]
     for word in ("cover", "second ball", "screening", "line", "shape", "organiser"):
         assert word not in analyst, word
-
-
-@pytest.mark.parametrize("text", ["The keeper saves it.", "Calderbrook lead 1-0 now.", "It is Rafe Ironsby's first.",
-                                  "That was a 0.252 xG chance."])
-def test_a_short_full_sentence_passes(goal, text):
-    moment, narrative = goal
-    version = json.loads(_good_reply(moment))["casual"] | {"detail": text}
-    assert check_version("casual", version, persona_inputs(moment, narrative))["detail"] == text
-
-
-def test_a_bare_number_reply_is_retried(goal):
-    moment, narrative = goal
-    bare = json.loads(_good_reply(moment))
-    for persona in PERSONAS:
-        bare[persona]["why"] = "0.252"
-    client = FakeClient(json.dumps(bare), _good_reply(moment))
-    versions = PersonaAgent(client, "m").versions(moment, narrative)
-    assert len(client.calls) == 2 and not any(v["fallback"] for v in versions.values())
 
 
 def _check_evidence(moment, version, overlay):

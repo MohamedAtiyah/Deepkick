@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -26,17 +25,6 @@ OVERLAY_PRIORITY = {
 }
 LOW_PRIORITY = 2  # at or below this, a moment for the viewer's non-favourite club is shown as priority 1
 VERSION_KEYS = ("headline", "detail", "why")
-MIN_SENTENCE_WORDS = 4
-# shortcut: a verb lexicon instead of a parser; captions use a narrow football vocabulary and the prompt asks
-# for full sentences. Upgrade to a part-of-speech tagger if real verbs get rejected.
-_VERB = re.compile(
-    r"\b(?:is|are|was|were|be|been|being|has|have|had|do|does|did|can|could|will|would|should|must|"
-    r"(?:it|that|there|what)'s|(?!speed\b)[a-z]{3,}ed|[a-z]{3,}ing|lead|leads|win|wins|won|trail|trails|"
-    r"hold|holds|held|keep|keeps|kept|give|gives|gave|put|puts|come|comes|came|go|goes|went|get|gets|got|"
-    r"take|takes|took|make|makes|made|find|finds|found|hit|hits|beat|beats|scores|shoots|saves|stops|misses|"
-    r"fires|slots|buries|reaches|covers|presses|sprints|pulls|levels|finishes|ends|needs|adds|counts|runs|ran|"
-    r"sees|saw|tells|shows|stands|sits|lets|says|said|led|lost|struck|drew|drove|broke|chose|threw|stood|"
-    r"sent|set|wrote|knew|thought|began|became)\b", re.I)
 
 SYSTEM_PROMPT = f"""You rewrite one football broadcast caption for three viewers, each in an unmistakable
 voice of its own.
@@ -134,10 +122,6 @@ def check_version(persona: str, version: Any, inputs: dict[str, Any]) -> dict[st
         raise ValueError(f"{persona} must have non-empty headline, detail and why")
     if len(version["headline"]) > HEADLINE_MAX:
         raise ValueError(f"{persona} headline is over {HEADLINE_MAX} characters")
-    for key in ("detail", "why"):
-        if len(version[key].split()) < MIN_SENTENCE_WORDS or not _VERB.search(version[key]):
-            raise ValueError(f"{persona} {key} must be a sentence of at least {MIN_SENTENCE_WORDS} words with a "
-                             f"verb, got {version[key]!r}")
     # Facts, evidence values, half and match clock; the narrative's own text is not a source.
     check_numbers(version.values(), allowed_numbers(inputs))
     player = inputs["moment"]["player"]
