@@ -11,6 +11,7 @@ from typing import Annotated, Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, StringConstraints
 
 from deepkick.agents.chat import ChatAgent
@@ -61,7 +62,6 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         app.state.speech = speech or Speech.from_env()
         app.state.chat = chat or ChatAgent()
         app.state.limiter = limiter or RateLimiter(per_client=6, total=30)
-        app.state.limiter = limiter or RateLimiter()
         stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "30"))) if replay
                             else live_events())
         task = asyncio.create_task(app.state.orchestrator.run(stream))
@@ -75,6 +75,22 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
     def state() -> dict[str, Any]:
         """The current match state: score, clock, team and player stats."""
         return app.state.orchestrator.snapshot()
+
+    @app.get("/events")
+    def event_feed(after: int | None = Query(None, ge=0), limit: int = Query(300, ge=1, le=1000)) -> dict[str, Any]:
+        """Events the pitch animates, in order: from index `after`, or the last 30 for a viewer joining late.
+
+        Spoiler-safe by construction: only events the orchestrator has already applied, so nothing past the clock.
+        """
+        applied = app.state.orchestrator.events
+        total = len(applied)
+        start = max(0, total - 30) if after is None else min(after, total)
+        chunk = applied[start:start + limit]
+        home = next((e["payload"]["home"]["id"] for e in applied[:1] if e["event_type"] == "match_metadata"), None)
+        return {"home": home, "next": start + len(chunk), "events": [
+            {k: e[k] for k in ("event_id", "match_clock", "half", "event_type", "team", "player", "coordinates")}
+            | {"payload": {k: v for k, v in e["payload"].items() if k not in ("lineups", "stadium", "referee")}}
+            for e in chunk]}
 
     @app.get("/timeline")
     def timeline(persona: Literal["analyst", "casual", "player"] = "casual", club: str | None = None,
@@ -159,6 +175,10 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         finally:
             orchestrator.listeners.remove(listener)
 
+    # The built broadcast view, mounted last so every API route above wins: one container serves site and API.
+    site = Path(os.environ.get("SITE_DIR", Path(__file__).resolve().parent.parent / "web" / "dist"))
+    if site.is_dir():
+        app.mount("/", StaticFiles(directory=site, html=True), name="site")
     return app
 
 

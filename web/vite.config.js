@@ -12,6 +12,7 @@ export default defineConfig({
       "/recap": api,
       "/catchup": api,
       "/timeline": api,
+      "/events": api,
       "/chat": api,
       "/healthz": api,
       "/speech": api,

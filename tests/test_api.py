@@ -159,3 +159,14 @@ def test_default_app_paces_the_replay_so_state_tracks_the_stream(monkeypatch):
         state, health = client.get("/state").json(), client.get("/healthz").json()
     assert health["status"] == "running"
     assert state["status"] == "kickoff" and "00:20" <= state["match_clock"] <= "01:00"  # not 90:00 and full time
+
+
+def test_the_built_site_is_served_at_the_root_and_the_api_still_answers(monkeypatch, tmp_path):
+    (tmp_path / "index.html").write_text("<title>Deepkick</title>")
+    monkeypatch.setenv("SITE_DIR", str(tmp_path))
+    with TestClient(create_app(_orchestrator(), replay_events(REPLAY_PATH))) as client:
+        assert "Deepkick" in client.get("/").text
+        _wait_until(lambda: client.get("/healthz").json()["status"] == "finished")
+    monkeypatch.setenv("SITE_DIR", str(tmp_path / "missing"))  # no build: API only, nothing at /
+    with TestClient(create_app(_orchestrator(), replay_events(REPLAY_PATH))) as client:
+        assert client.get("/").status_code == 404

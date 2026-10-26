@@ -257,7 +257,7 @@ button, select { font: inherit; color: inherit; }
 .pitch .lines .spot { fill: var(--pitch-line); stroke: none; }
 .pitch .lines .goal { fill: color-mix(in srgb, var(--pitch-line) 15%, transparent); }
 
-/* Players ease to their spots and the ball glides between event coordinates, so nothing teleports. */
+/* Markers are moved every animation frame by the motion engine in Pitch.jsx, so nothing teleports. */
 .pitch .player, .pitch .ball { position: absolute; transform: translate(-50%, -50%); }
 .pitch .player {
   display: grid;
@@ -271,7 +271,6 @@ button, select { font: inherit; color: inherit; }
   font-size: max(8px, 1.2cqw);
   font-weight: 700;
   box-shadow: 0 2px 6px var(--shadow);
-  transition: left 0.4s ease-out, top 0.4s ease-out;
 }
 .pitch .player.on-ball { z-index: 1; box-shadow: 0 0 0 3px var(--pitch-line); }
 .pitch .ball {
@@ -281,7 +280,21 @@ button, select { font: inherit; color: inherit; }
   background: var(--ball);
   box-shadow: 0 0 6px var(--ball);
   z-index: 2;
-  transition: left 0.6s ease-in-out, top 0.6s ease-in-out;
+}
+/* Goals: a short pulse in the net (motion.js marks the side). The engine moves markers every frame, so no
+   CSS transitions on left/top. */
+.net {
+  position: absolute;
+  width: 2%;
+  height: 10.3%; /* 7.32 m of the 71 m box */
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.net.pulse { animation: net-pulse 0.9s ease-out; }
+@keyframes net-pulse {
+  0% { background: color-mix(in srgb, var(--pitch-line) 85%, transparent); box-shadow: 0 0 18px var(--pitch-line); }
+  100% { background: transparent; box-shadow: none; }
 }
 
 /* Chips name the moment type; goals and big chances stand out. */

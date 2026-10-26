@@ -30,7 +30,7 @@ LENGTH, WIDTH = 105.0, 68.0
 CENTRE = (LENGTH / 2, WIDTH / 2)
 BLOCK_SHIFT = 0.4  # how far the defending block follows the ball when counting lines a pass bypasses
 # The team shape around the ball: the block slides toward it, capped, defenders half as far as forwards, keepers
-# near their line. Stronger than the broadcast pitch's drawn shift (web/src/pitchLayout.js), which is cosmetic.
+# near their line. The same numbers as the broadcast pitch draws it (web/src/pitchLayout.js).
 SHAPE_RATE, SHAPE_MAX = (0.35, 0.3), (18.0, 10.0)
 ROLE_SHIFT = {"defender": 0.5, "midfielder": 0.75, "forward": 1.0}
 GK_SHIFT_MAX = 4.0
