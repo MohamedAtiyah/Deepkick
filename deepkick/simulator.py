@@ -28,7 +28,13 @@ HALF_TIME_BREAK = 15 * 60
 BATCH_SIZE = 200  # ~90 KB per batch, well under the Basic tier 256 KB limit
 LENGTH, WIDTH = 105.0, 68.0
 CENTRE = (LENGTH / 2, WIDTH / 2)
-BLOCK_SHIFT = 0.4  # how far outfield players follow the ball up or down the pitch from their slot
+BLOCK_SHIFT = 0.4  # how far the defending block follows the ball when counting lines a pass bypasses
+# The team shape around the ball: the block slides toward it, capped, defenders half as far as forwards, keepers
+# near their line. Stronger than the broadcast pitch's drawn shift (web/src/pitchLayout.js), which is cosmetic.
+SHAPE_RATE, SHAPE_MAX = (0.35, 0.3), (18.0, 10.0)
+ROLE_SHIFT = {"defender": 0.5, "midfielder": 0.75, "forward": 1.0}
+GK_SHIFT_MAX = 4.0
+ACTOR_REACH_M = 8.0  # how sharply actors are chosen near the ball: weight exp(-(distance / reach)^2)
 TRACK_S = 5 * 60  # every starter's off-ball distance is reported this often
 RUN_M_PER_MIN = {"GK": 55.0, "outfield": 98.0}  # per minute, before the stamina factor (0.8-1.2)
 BOX = (LENGTH - 16.5, WIDTH / 2 - 20.16, WIDTH / 2 + 20.16)  # penalty area: x from, y from, y to
@@ -49,6 +55,23 @@ def _clamp(x: float, y: float) -> tuple[float, float]:
 def _flip(xy: tuple[float, float]) -> tuple[float, float]:
     """Same point seen from the other team's attacking direction."""
     return LENGTH - xy[0], WIDTH - xy[1]
+
+
+def _role(position: str) -> str:
+    """GK, defender, midfielder or forward from a position code."""
+    return "GK" if position == "GK" else "defender" if position.endswith("B") else (
+        "midfielder" if position.endswith("M") else "forward")
+
+
+def shape_point(position: str, slot: dict[str, float], ball: tuple[float, float]) -> tuple[float, float]:
+    """Where a player stands in the team shape for a ball position (the team's own frame), kept on the pitch."""
+    shift = [max(-cap, min(cap, (b - c) * rate)) for b, c, rate, cap in zip(ball, CENTRE, SHAPE_RATE, SHAPE_MAX)]
+    role = _role(position)
+    if role == "GK":
+        dx, dy = (max(-GK_SHIFT_MAX, min(GK_SHIFT_MAX, s)) for s in shift)
+    else:
+        dx, dy = (s * ROLE_SHIFT[role] for s in shift)
+    return _clamp(slot["x"] + dx, slot["y"] + dy)
 
 
 def _ref(player: dict[str, Any]) -> dict[str, Any]:
@@ -102,15 +125,15 @@ class _Match:
 
     def pick_near(self, team: str, xy: tuple[float, float], exclude: dict[str, Any] | None = None,
                   outfield: bool = False) -> dict[str, Any]:
-        """Pick a starter of `team`, favouring those whose slot is near `xy` (in that team's frame)."""
+        """Pick a starter of `team` near `xy` (in that team's frame): weighted sharply toward the team-mates whose
+        place in the shape around the ball (their slot shifted with the ball) is nearest."""
         club = self.club(team)
         pool = [p for p in club["starters"]
                 if p is not exclude and not (outfield and p["position"] == "GK")]
-        weights = []
-        for p in pool:
-            slot = club["formation"]["slots"][p["position"]]
-            sx = slot["x"] if p["position"] == "GK" else slot["x"] + (xy[0] - CENTRE[0]) * BLOCK_SHIFT
-            weights.append(1 / (1 + (math.hypot(sx - xy[0], slot["y"] - xy[1]) / 12) ** 2))
+        weights = [math.exp(-(math.dist(shape_point(p["position"], club["formation"]["slots"][p["position"]], xy), xy)
+                              / ACTOR_REACH_M) ** 2) for p in pool]
+        if not sum(weights):  # everyone is far away: the nearest still takes it
+            weights = [1.0 if w == max(weights) else 0.0 for w in weights]
         return self.rng.choices(pool, weights)[0]
 
     def emit(self, event_type: str, team: str, player: dict[str, Any] | None,

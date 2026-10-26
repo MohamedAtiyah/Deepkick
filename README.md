@@ -25,7 +25,8 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 [`deepkick/simulator.py`](deepkick/simulator.py) plays the 90-minute fixture from `data/league.json` and emits about 1,500 events (`match_metadata`, `pass`, `shot`, `tackle`, `possession_change`, `pressure_event`, `player_run`) that follow the event contract in [`deepkick/contracts.py`](deepkick/contracts.py).
 
 - **Seeded:** the same `--seed` always produces the same match, event ids and timestamps.
-- **Slot-based:** the player who receives, presses or tackles is picked by how close their formation slot is to the ball (outfield slots shift up and down with play), so strikers shoot and centre-backs defend.
+- **Actors near the ball:** the player who receives, presses, tackles or wins the ball is picked from the team-mates whose place in the team shape is nearest the ball, with weight `exp(-(distance / 8 m)²)`. Their place in the shape is their formation slot shifted with the ball: the block slides up to 18 m along and 10 m across, defenders half as far, keepers at most 4 m. So strikers shoot, centre-backs defend, and no player has to cross the field to reach the ball.
+  - **On seed 42:** actors are a median 11.6 m from their place in the shape, and 10% are over 20 m (it was 19.7 m and 49% when slots only shifted along the pitch, with a softer weighting). No actor needs more than 9 m/s to reach the ball from there since the previous event (10% did before).
 - **Pass difficulty:** every pass carries `difficulty` (0–1). It rises with pass length, a pass into the box, pressure on the passer and the number of opposition outfield players the pass goes past (line-breaking). Completion odds fall as difficulty rises.
 - **Shot speed:** every shot carries `speed_kmh` (60–130). Longer shots are struck harder.
 - **Distance covered:** every 5 minutes, and at the end of each half, each starter gets an off-ball `player_run` (`with_ball: false`) with the distance run since the last report. Outfield players cover about 9.5–10.5 km a match and keepers about 5 km, scaled by their stamina rating.
@@ -100,7 +101,7 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
 .venv/bin/python -m deepkick.moments tests/fixtures/replay_ASH-CAL-42.jsonl
 ```
 
-The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprint_milestone=6, goal=5, speed_milestone=4, momentum_swing=4, pressure_spell=4, high_press_win=4, big_chance=3, distance_milestone=3, half_time=1, full_time=1`.
+The summary line shows the mix at a glance. For seed 42 it is `44 moments: sprint_milestone=12, goal=8, momentum_swing=6, pressure_spell=4, speed_milestone=3, high_press_win=3, distance_milestone=3, big_chance=2, half_time=1, pass_milestone=1, full_time=1`.
 
 **Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs, calls `StatsAgent.update` and then `MomentDetector.detect` for each event, and sends the moments to the Narrative Agent.
 
@@ -143,9 +144,9 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 - **Overlay cap:** a match minute's moments are held until the clock moves past that minute, then cut to at most 3, dropping the lowest moment priority first (ties keep the earlier moment). Goals, half-time and full-time are never dropped. Each drop is logged with its moment id and priority. The cap runs before any model call, so a dropped moment costs nothing.
 - **Explain and Personalise off the hot path:**
   - **Workers:** kept moments go on a queue served by 3 workers (`--workers` to change it). The gpt-5-mini deployment allows 50,000 tokens a minute, or about 25 calls at roughly 2,000 tokens each, so 3 concurrent workers stay inside it.
-  - **Priority 2 and up only:** only moments of detector priority 2 or more (goals, big chances, pressure spells, momentum swings, half-time, full-time) call the model. Priority 1 moments (sprint, speed and distance milestones, high press wins) use the existing templates, so seed 42 makes about 36 model calls instead of about 70.
+  - **Priority 2 and up only:** only moments of detector priority 2 or more (goals, big chances, pressure spells, momentum swings, half-time, full-time) call the model. Priority 1 moments (sprint, speed and distance milestones, high press wins) use the existing templates, so seed 42 makes about 44 model calls instead of about 88.
   - **Per-moment workflow:** each worker runs that moment through its own Agent Framework workflow: `ExplainExecutor` (Narrative Agent), then `PersonaliseExecutor` (Persona Agent). The blocking model calls run in threads.
-  - **Why it's needed:** a narrative call takes 6–10 s and a persona call 6–12 s, and a seed-42 match has 35 moments, so running them one after another would take about 10 minutes.
+  - **Why it's needed:** a narrative call takes 6–10 s and a persona call 6–12 s, and a seed-42 match has 44 moments, so running them one after another would take about 12 minutes.
   - **Timeouts and errors:** a timeout or error in one moment uses that moment's template fallback, and the other workers carry on.
 - **Clock order:** finished overlays are buffered and released in match-clock (`show_at_ms`) order, even when a later moment finishes first.
 - **Half-time and full-time:** these pass through as normal overlays until the recap agent exists.
@@ -290,8 +291,7 @@ In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/t
   - **Worked examples:** the prompt includes one for each persona, for a goal (Rafe Ironsby) and for a saved big chance (Soren Fallowmere). A test runs both through the same checks as the model's replies.
   - **Facts still win:** the facts hold no player positions, keeper position or defensive shape. Each voice frames the facts in its own terms, but must never claim that a player was out of position or switched off, that a line broke, or where the keeper was, and must never use shape words to explain why something happened. The names used are fictional league names only.
 - **Checks, one version at a time:** each version must have non-empty fields and a headline of at most 70 characters. Every number in it must appear in the moment facts or the narrative's evidence; the narrative's text isn't a source, and the match clock counts. The player headline must contain the player's name.
-  - **Full sentences:** `detail` and `why` must each be at least 4 words with a verb, so a bare figure such as "0.215" or a fragment such as "A 0.252 xG chance." is rejected and retried.
-  - **How the verb check works:** it uses a small lexicon of football verbs, `-ed` and `-ing` forms, and is/has/it's, not a parser. An unusual verb can be rejected wrongly.
+  - **Full sentences:** the prompt asks for `detail` and `why` to be full sentences, but the reply is not checked for it. A verb-lexicon check used to reject good lines ("He times the connection perfectly and the long-range shot flies in.") and sent 13 of 18 model moments to the template.
   - **Position codes** are spelled out afterwards, as in the Narrative Agent.
 - **Prompt-only rules:** the three voices, the word limits, how many numbers the casual version uses, plain wording, normal punctuation and four content rules are not checked by code. The content rules are: describe only what the facts show; make no claims about fatigue, confidence, intent, form or effort; never say one event caused another unless the facts say so; and never describe a shot speed (the ball's speed) or shot distance (from goal) as a player running.
 - **Failure recovery:** it reuses the Narrative Agent's client setup, endpoint handling, 30-second timeout and single retry.
@@ -394,9 +394,10 @@ Together with the number checks (a narrative may only cite numbers present in th
 
 [`deepkick/agents/recap.py`](deepkick/agents/recap.py) writes a recap at the half-time and full-time moments. One Foundry call returns all three persona recaps, using the same pattern as the Persona Agent: one call, checks one version at a time, and a template for each version that fails.
 
-- **Input:** the stats snapshot at that clock (score, and each team's goals, shots, shots on target, expected goals, possession, pass accuracy, tackles won and pressures won), plus every moment detected up to that clock (type, clock, football minute, team, player and facts).
+- **Input:** the stats snapshot at that clock (score, and each team's goals, shots, shots on target, expected goals, possession, pass accuracy, tackles won and pressures won), the goals so far in order (minute, team, scorer), and every moment detected up to that clock (type, clock, football minute, team, player and facts).
+- **Goals in every voice:** the prompt has every persona name every goal with its scorer and minute before any other number, and a player's goals can share one mention ("Caius Mossington (20', 22', 33')"). On the 8-goal seed-42 match, the analyst used to write only stats and casual's three-number cap dropped goal minutes, so 3 of 6 recaps fell back to the template. Goal minutes no longer count toward that cap, and the cap on sentences is 6 so the goals fit. Two live runs after the change: 0 of 12 recaps left out a goal; 1 analyst recap ran to 6 sentences under the old cap of 5.
 - **Checks, one version at a time:**
-  - 3 to 5 sentences;
+  - 3 to 6 sentences;
   - every number must appear in that input (the clocks count);
   - every goal must be named with its scorer and minute. The minute is the moment's football minute, so 13:52 on the clock is the 14th minute.
 
@@ -406,7 +407,7 @@ Together with the number checks (a narrative may only cite numbers present in th
 - **Shared state:** recaps are stored in the orchestrator's shared state.
 - **Arabic:** each recap is translated once, in one Translator batch for all three personas (`translate_recap` in [`deepkick/agents/translate.py`](deepkick/agents/translate.py)). Names and numbers are protected, and a recap whose numbers changed keeps its English text.
 - **API:** `GET /recap?persona=&lang=` returns `{recap_id, type, match_clock, score, persona, lang, text, source}` for each recap, newest first. `source` is `model` or `template`.
-- **Logging:** each handoff logs `stage=recap event_id=… type=half_time|full_time duration_ms=… fallback=yes|no sources=analyst:model|template,…`. Each templated version and each failed attempt is logged with its reason.
+- **Logging:** each handoff logs `stage=recap event_id=… type=half_time|full_time duration_ms=… fallback=yes|no sources=analyst:model|template,…`. Each templated version and each failed attempt is logged with its reason, and a templated version also logs the rejected text.
 
 **Azure services:** the Microsoft Foundry deployment (`FOUNDRY_*`) and Azure AI Translator for Arabic. Without `FOUNDRY_*`, every recap uses its template.
 
@@ -426,7 +427,7 @@ curl "localhost:8000/catchup?persona=casual&lang=en&minutes=10"
 ```
 
 **Tests:** [`tests/test_recap.py`](tests/test_recap.py) runs the seed-42 replay with a fake model client. It covers:
-- the full-time recap naming all 5 goals with scorer and minute (and the half-time recap leaving out the second-half goal);
+- the full-time recap naming all 8 goals with scorer and minute (and the half-time recap leaving out the second-half goal);
 - one model call writing all three recaps;
 - one failed version templated alone;
 - timeouts falling back to the template after one retry;

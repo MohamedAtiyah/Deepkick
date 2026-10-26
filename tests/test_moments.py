@@ -57,7 +57,8 @@ def test_one_goal_moment_per_goal_in_order(replay, moments):
     goals = [e for e in replay if e["event_type"] == "shot" and e["payload"]["outcome"] == "goal"]
     assert [m["event_id"] for m in _of(moments, "goal")] == [e["event_id"] for e in goals]
     assert [m["facts"]["kind"] for m in _of(moments, "goal")] == [
-        "opener", "extends_lead", "extends_lead", "pulls_back", "pulls_back"]
+        "opener", "extends_lead", "extends_lead", "pulls_back", "extends_lead", "pulls_back", "extends_lead",
+        "pulls_back"]
 
 
 def test_big_chances_are_exactly_the_missed_high_xg_shots(replay, moments):

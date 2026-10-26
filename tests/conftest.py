@@ -12,15 +12,26 @@ import pytest
 REPLAY_PATH = Path(__file__).parent / "fixtures" / "replay_ASH-CAL-42.jsonl"
 
 
-@pytest.fixture(autouse=True)
-def no_real_azure(monkeypatch):
-    """Tests never read the developer's .env or reach Azure: dotenv does nothing and every Azure setting is unset."""
+AZURE_SETTINGS = ("FOUNDRY_ENDPOINT", "FOUNDRY_MODEL_DEPLOYMENT", "FOUNDRY_API_KEY", "AZURE_TRANSLATOR_KEY",
+                  "AZURE_TRANSLATOR_REGION", "AZURE_TRANSLATOR_ENDPOINT", "AZURE_SPEECH_KEY", "AZURE_SPEECH_REGION",
+                  "EVENTHUB_CONNECTION_STRING", "EVENTHUB_NAME")
+AZURE_PREFIXES = ("FOUNDRY_", "AZURE_TRANSLATOR_", "AZURE_SPEECH_", "EVENTHUB_")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_real_azure():
+    """Tests never read the developer's .env or reach Azure: dotenv does nothing and every Azure setting is "".
+
+    Session-scoped so it is in place before module fixtures build agents. Empty rather than unset, because
+    load_dotenv never overrides a variable that already exists.
+    """
     import dotenv
 
-    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: False)
-    prefixes = ("FOUNDRY_", "AZURE_TRANSLATOR_", "AZURE_SPEECH_", "EVENTHUB_")
-    for key in [k for k in os.environ if k.startswith(prefixes)]:
-        monkeypatch.delenv(key)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: False)
+        for key in {*AZURE_SETTINGS, *(k for k in os.environ if k.startswith(AZURE_PREFIXES))}:
+            mp.setenv(key, "")
+        yield
 
 
 @pytest.fixture(scope="session")

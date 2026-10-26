@@ -15,25 +15,29 @@ from deepkick.simulator import clock_seconds
 log = logging.getLogger("deepkick.recap")
 
 RECAP_TYPES = ("half_time", "full_time")
-SENTENCES = (3, 5)
+SENTENCES = (3, 6)  # 6: the goals take a sentence before the voice's own numbers
 TEAM_STATS = ("goals", "shots", "shots_on_target", "xg", "possession_pct", "pass_accuracy_pct", "tackles_won",
               "pressures_won")
 
 SYSTEM_PROMPT = f"""You write the half-time or full-time recap of a football match for three viewers.
 
-You get a JSON object with `recap` ("half_time" or "full_time"), `match_state` (score and team stats at that clock)
-and `moments` (every flagged moment so far: type, match_clock, minute, team, player and facts).
+You get a JSON object with `recap` ("half_time" or "full_time"), `match_state` (score and team stats at that clock),
+`goals` (every goal so far, in order: minute, team and scorer) and `moments` (every flagged moment so far: type,
+match_clock, minute, team, player and facts).
 Reply with one JSON object and nothing else, with exactly the keys "analyst", "casual" and "player".
 Each is an object with exactly one key, "text": the recap, {SENTENCES[0]} to {SENTENCES[1]} sentences.
 
 The three voices:
-- analyst: the numbers: expected goals, shots, shots on target, possession and pass accuracy. Blunt and direct.
-- casual: warm and plain, the story of the half or the match, almost no jargon and at most three numbers.
+- analyst: the goals, then the numbers: expected goals, shots, shots on target, possession and pass accuracy. Blunt
+  and direct.
+- casual: warm and plain, the story of the half or the match, almost no jargon and at most three numbers besides the
+  goal minutes.
 - player: the finishers' view: the goals and the big chances, who took theirs and who did not.
 
 Rules for all three:
-- Name every goal in `moments` with its scorer and its minute, written as the moment's `minute` number (for example
-  "Rafe Ironsby scored in minute 14" or "Rafe Ironsby (14')").
+- Every voice names every goal in `goals` with its scorer and its `minute` (for example "Rafe Ironsby scored in
+  minute 14" or "Rafe Ironsby (14')"). A player's goals can share one mention: "Caius Mossington (20', 22', 33')".
+  Leave out no goal, however many there are; the goals come before the other numbers.
 - Cite only numbers that appear in the input, copied exactly. Never round, add, subtract or count anything yourself.
 - Describe only what the facts show. Make no claims about fatigue, confidence, intent, form or effort.
 - Plain broadcast English with no raw field names: say "possession", "shots on target", "expected goals".
@@ -47,22 +51,25 @@ def _minute(moment: dict[str, Any]) -> int:
 
 
 def recap_inputs(moment: dict[str, Any], snapshot: dict[str, Any], moments: list[dict[str, Any]]) -> dict[str, Any]:
-    """Build the exact JSON the model sees: the score and team stats at the recap's clock and the moments so far."""
+    """Build the exact JSON the model sees: score and team stats at the recap's clock, the goals and moments so far."""
     at = clock_seconds(moment)
+    so_far = [{"type": m["type"], "match_clock": m["match_clock"], "minute": _minute(m), "team": m["team"],
+               "player": m["player"]["name"] if m["player"] else None, "facts": m["facts"]}
+              for m in moments if clock_seconds(m) <= at]
     return {
         "recap": moment["type"],
         "match_state": {"match_clock": snapshot["match_clock"], "score": snapshot["score"],
                         "teams": {tid: {"name": t["name"]} | {k: t[k] for k in TEAM_STATS}
                                   for tid, t in snapshot["teams"].items()}},
-        "moments": [{"type": m["type"], "match_clock": m["match_clock"], "minute": _minute(m), "team": m["team"],
-                     "player": m["player"]["name"] if m["player"] else None, "facts": m["facts"]}
-                    for m in moments if clock_seconds(m) <= at],
+        "goals": [{"minute": m["minute"], "team": m["team"], "scorer": m["player"]}
+                  for m in so_far if m["type"] == "goal"],
+        "moments": so_far,
     }
 
 
 def goals(inputs: dict[str, Any]) -> list[tuple[str, int]]:
     """(scorer, minute) for every goal in the recap inputs, in match order."""
-    return [(m["player"], m["minute"]) for m in inputs["moments"] if m["type"] == "goal"]
+    return [(g["scorer"], g["minute"]) for g in inputs["goals"]]
 
 
 def allowed(inputs: dict[str, Any]) -> set[float]:
@@ -163,7 +170,8 @@ class RecapAgent:
         if len(failed) == len(PERSONAS):
             raise ValueError(f"every recap failed: {'; '.join(str(e) for e in failed.values())}")
         for persona, exc in failed.items():
-            log.warning("stage=recap event_id=%s persona=%s fallback=yes: %s", event_id, persona, exc)
+            log.warning("stage=recap event_id=%s persona=%s fallback=yes: %s; rejected=%r", event_id, persona, exc,
+                        raw[persona])
         return out
 
 
