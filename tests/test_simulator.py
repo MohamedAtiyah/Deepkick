@@ -3,12 +3,13 @@
 import copy
 import io
 import json
+import math
 
 import pytest
 
 import deepkick.simulator
-from deepkick.simulator import (RUN_SPEED_KMH, clock_seconds, load_league, run_speed_kmh, send_events, simulate_match,
-                                write_replay)
+from deepkick.simulator import (RUN_SPEED_KMH, _Match, clock_seconds, load_league, run_speed_kmh, send_events,
+                                shape_point, simulate_match, write_replay)
 
 
 def test_same_seed_reproduces_the_replay_file(replay):
@@ -156,3 +157,52 @@ def test_run_speed_rises_with_distance_dips_with_the_ball_and_is_capped():
     assert mean[(18.0, True)] < mean[(18.0, False)]
     assert all(RUN_SPEED_KMH[0] <= s <= 37 for v in speeds.values() for s in v)
     assert run_speed_kmh(42, "ASH-CAL-42-00005", 14.9, True) == run_speed_kmh(42, "ASH-CAL-42-00005", 14.9, True)
+
+
+def _shape_distances(replay):
+    """For every on-ball action, how far the actor is from his place in the team shape around the ball."""
+    league = load_league()
+    slots = {p["id"]: (p["position"], c["formation"]["slots"][p["position"]]) for c in league["clubs"]
+             for p in c["starters"]}
+    out = []
+    for e in replay:
+        if not e["player"] or e["event_type"] in ("possession_change", "match_metadata"):
+            continue
+        if e["event_type"] == "player_run" and e["payload"]["end"] == e["coordinates"]:
+            continue  # a tracking summary, not an action
+        xy = (e["coordinates"]["x"], e["coordinates"]["y"])
+        out.append(math.dist(shape_point(*slots[e["player"]["id"]], xy), xy))
+    return sorted(out)
+
+
+def test_actors_are_chosen_near_the_ball(replay):
+    # Each action goes to a team-mate whose place in the shape is near the ball, so the pitch never has to send a
+    # player across the field to reach it. (Before this rule: median 19.7 m and 49% over 20 m on seed 42.)
+    distances = _shape_distances(replay)
+    assert distances[len(distances) // 2] < 14
+    assert sum(d > 20 for d in distances) / len(distances) < 0.15
+
+
+def test_pick_near_favours_the_nearest_team_mate_in_the_shape():
+    match = _Match(load_league(), seed=7, kickoff=deepkick.simulator.KICKOFF)
+    club = match.club("ASH")
+    striker = next(p for p in club["starters"] if p["position"] == "RST")
+    ball = shape_point("RST", club["formation"]["slots"]["RST"], (80.0, 40.0))  # right where the striker stands
+    picks = [match.pick_near("ASH", ball)["id"] for _ in range(300)]
+    assert picks.count(striker["id"]) / len(picks) > 0.5
+    keeper = next(p for p in club["starters"] if p["position"] == "GK")
+    assert keeper["id"] not in picks  # a keeper 75 m away is never chosen for a ball at the other end
+
+
+def test_shape_point_shifts_the_block_like_the_pitch_and_stays_on_it():
+    slot = {"x": 75, "y": 42}
+    assert shape_point("RST", slot, (52.5, 34)) == (75, 42)  # ball on the centre spot: no shift
+    assert shape_point("RST", slot, (105, 68)) == (93, 52)  # the cap: 18 m along, 10 m across
+    assert shape_point("RCB", {"x": 22, "y": 44}, (105, 68)) == (31, 49)  # defenders move half as far
+    assert shape_point("GK", {"x": 5, "y": 34}, (105, 68)) == (9, 38)  # keepers at most 4 m
+    x, y = shape_point("RW", {"x": 100, "y": 66}, (105, 68))
+    assert x <= 105 and y <= 68  # never off the pitch
+
+
+def test_the_same_seed_still_gives_the_same_match_with_the_new_actor_rule():
+    assert simulate_match(42) == simulate_match(42)

@@ -99,7 +99,7 @@ test("every event of the seed-42 replay turns into steps, with no step left pend
   const { steps, pending } = toSteps(events, HOME);
   assert.equal(pending.length, 0);
   const kinds = steps.reduce((n, s) => ({ ...n, [s.kind]: (n[s.kind] ?? 0) + 1 }), {});
-  assert.equal(kinds.shot, 30);
+  assert.equal(kinds.shot, 32);
   assert.ok(kinds.pass > 500 && kinds.intercept > 50 && kinds.run > 50);
   for (const s of steps) {
     for (const [x, y] of [s.from, s.to].filter(Boolean)) assert.ok(x >= 0 && x <= 105 && y >= -1 && y <= 69);

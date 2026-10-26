@@ -14,7 +14,7 @@ from deepkick.orchestrator import Orchestrator, replay_events
 from deepkick.simulator import clock_seconds
 from tests.conftest import REPLAY_PATH, FakeClient, timeout_error
 
-GOALS = 5  # seed 42 ends ASH 2-3 CAL
+GOALS = 8  # seed 42 ends ASH 3-5 CAL
 
 
 @pytest.fixture(scope="module")
@@ -46,14 +46,14 @@ def _model_reply(inputs, broken=()):
     return json.dumps({p: {"text": text + (" They had 99 chances." if p in broken else "")} for p in PERSONAS})
 
 
-def test_the_full_time_recap_names_all_five_goals_with_scorer_and_minute(finished, full_time):
+def test_the_full_time_recap_names_all_eight_goals_with_scorer_and_minute(finished, full_time):
     inputs = recap_inputs(*full_time)
     assert len(goals(inputs)) == GOALS
     for persona in PERSONAS:
         full, half = (r["text"] for r in finished.recaps(persona, "en"))
         assert _mentions_every_goal(full, inputs), persona
         assert "Florin Underhay" in full and "Florin Underhay" not in half  # a second-half goal is not in the HT recap
-        assert full.startswith("Full-time: Ashvale Wanderers 2-3 Calderbrook Athletic.")
+        assert full.startswith("Full-time: Ashvale Wanderers 3-5 Calderbrook Athletic.")
 
 
 def test_one_model_call_writes_all_three_recaps(full_time, caplog):
