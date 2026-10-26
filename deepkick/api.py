@@ -11,14 +11,13 @@ from typing import Annotated, Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, StringConstraints
 
-from deepkick.agents.chat import ChatAgent
+from deepkick.agents.ask import AskAgent, RateLimiter, ask_facts
 from deepkick.agents.persona import select_overlay
 from deepkick.agents.speech import Speech, spoken_text
 from deepkick.contracts import LANGS, PERSONAS
 from deepkick.orchestrator import Orchestrator, live_events, replay_events
-from deepkick.ratelimit import RateLimiter
 
 log = logging.getLogger("deepkick.api")
 
@@ -28,26 +27,17 @@ def _log_failure(task: asyncio.Task) -> None:
         log.error("stage=api orchestrator stopped: %r", task.exception())
 
 
-HISTORY = 6  # messages of the conversation the server keeps
+class AskRequest(BaseModel):
+    """A viewer's question: 3-200 characters after stripping, in a persona and language, optionally about one overlay."""
 
-
-class ChatMessage(BaseModel):
-    """One message of the conversation the client sends: the viewer's or a previous answer, at most 300 characters."""
-
-    role: Literal["user", "assistant"]
-    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
-
-
-class ChatRequest(BaseModel):
-    """A chat turn: the conversation so far (the last message is the viewer's question), persona and language."""
-
-    messages: Annotated[list[ChatMessage], Field(min_length=1)]
+    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=200)]
     persona: Literal["analyst", "casual", "player"] = "casual"
     lang: Literal["en", "ar"] = "en"
+    overlay_id: str | None = None
 
 
 def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[dict[str, Any]] | None = None,
-               speech: Speech | None = None, chat: ChatAgent | None = None,
+               speech: Speech | None = None, asker: AskAgent | None = None,
                limiter: RateLimiter | None = None) -> FastAPI:
     """Build the API. With no arguments, startup runs an orchestrator on REPLAY_FILE if set, else on Event Hubs."""
 
@@ -60,8 +50,7 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         app.state.mode = "injected" if events else "replay" if replay else "live"
         app.state.orchestrator = orchestrator or Orchestrator()
         app.state.speech = speech or Speech.from_env()
-        app.state.chat = chat or ChatAgent()
-        app.state.limiter = limiter or RateLimiter(per_client=6, total=30)
+        app.state.asker = asker or AskAgent()
         app.state.limiter = limiter or RateLimiter()
         stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "30"))) if replay
                             else live_events())
@@ -76,22 +65,6 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
     def state() -> dict[str, Any]:
         """The current match state: score, clock, team and player stats."""
         return app.state.orchestrator.snapshot()
-
-    @app.get("/events")
-    def event_feed(after: int | None = Query(None, ge=0), limit: int = Query(300, ge=1, le=1000)) -> dict[str, Any]:
-        """Events the pitch animates, in order: from index `after`, or the last 30 for a viewer joining late.
-
-        Spoiler-safe by construction: only events the orchestrator has already applied, so nothing past the clock.
-        """
-        applied = app.state.orchestrator.events
-        total = len(applied)
-        start = max(0, total - 30) if after is None else min(after, total)
-        chunk = applied[start:start + limit]
-        home = next((e["payload"]["home"]["id"] for e in applied[:1] if e["event_type"] == "match_metadata"), None)
-        return {"home": home, "next": start + len(chunk), "events": [
-            {k: e[k] for k in ("event_id", "match_clock", "half", "event_type", "team", "player", "coordinates")}
-            | {"payload": {k: v for k, v in e["payload"].items() if k not in ("lineups", "stadium", "referee")}}
-            for e in chunk]}
 
     @app.get("/timeline")
     def timeline(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
@@ -127,11 +100,9 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
             raise HTTPException(503, "commentary is unavailable for this overlay")  # the text overlay still ships
         return Response(audio, media_type="audio/mpeg")
 
-    @app.post("/chat")
-    def chat_turn(body: ChatRequest, request: Request) -> Any:
-        """Answer the last message from the match tools only (up to the live clock); 429 when over the rate limit."""
-        if body.messages[-1].role != "user":
-            raise HTTPException(422, "the last message must be the viewer's question")
+    @app.post("/ask")
+    def ask(body: AskRequest, request: Request) -> Any:
+        """Answer a question from the live facts only (and the selected moment), or decline; 429 when over the limit."""
         # shortcut: X-Forwarded-For can be spoofed to dodge the per-client limit; the global limit still caps the
         # model calls. Behind Azure Container Apps, trust only the ingress's own hop once it is deployed.
         client = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -139,9 +110,11 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         if not app.state.limiter.allow(client):
             return JSONResponse({"detail": "Lots of questions right now. Give it a minute and ask again."}, 429)
         orchestrator = app.state.orchestrator
-        history = [m.model_dump() for m in body.messages[-HISTORY:]]
-        return app.state.chat.reply(history, body.persona, body.lang, orchestrator.match_data(),
-                                    orchestrator.translator)
+        moment = orchestrator.released_moment(body.overlay_id) if body.overlay_id else None
+        if body.overlay_id and moment is None:
+            raise HTTPException(404, f"no released overlay {body.overlay_id!r}")
+        facts = ask_facts(orchestrator.snapshot(), moment)
+        return app.state.asker.answer(body.question, body.persona, facts, body.lang, orchestrator.translator)
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:

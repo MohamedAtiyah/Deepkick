@@ -154,7 +154,7 @@ def test_default_app_paces_the_replay_so_state_tracks_the_stream(monkeypatch):
 
 
 def test_arabic_overlays_over_ws_and_recap_with_a_mocked_translator():
-    from tests.test_translate import ARABIC, as_arabic, fake_translator
+    from tests.test_translate import ARABIC, fake_translator
 
     translator, requests = fake_translator()
     client = _failing_client()
@@ -172,11 +172,10 @@ def test_arabic_overlays_over_ws_and_recap_with_a_mocked_translator():
                 ws.receive_json()
     for a, e in zip(ar, en):
         validate_overlay(a)
-        assert a["lang"] == "ar" and a["payload"]["headline"] == as_arabic(e["payload"]["headline"], translator)
-        assert a["payload"]["player"] == e["payload"]["player"]  # the data field keeps the league's spelling
+        assert a["lang"] == "ar" and a["payload"]["headline"] == ARABIC + e["payload"]["headline"]
+        assert a["payload"]["player"] == e["payload"]["player"]  # names stay as they are
         # Evidence labels are translated with the text; values stay exactly the English (fact) values.
-        assert [x["label"] for x in a["payload"]["evidence"]] == [as_arabic(x["label"], translator)
-                                                                  for x in e["payload"]["evidence"]]
+        assert [x["label"] for x in a["payload"]["evidence"]] == [ARABIC + x["label"] for x in e["payload"]["evidence"]]
         assert [x["value"] for x in a["payload"]["evidence"]] == [x["value"] for x in e["payload"]["evidence"]]
         assert a["payload"]["source"] == e["payload"]["source"] == "template"  # the model client always fails here
     assert [r["lang"] for r in recap] == ["ar", "ar"] and all(r["text"].startswith(ARABIC) for r in recap)

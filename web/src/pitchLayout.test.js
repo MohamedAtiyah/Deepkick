@@ -32,18 +32,17 @@ test("the player on the ball is at the event coordinates, in the right team's fr
   assert.equal(points[holder.id].onBall, true);
 });
 
-test("the shared shift is capped and scaled by role; keepers move at most 4 m", () => {
-  assert.deepEqual(teamShift(LENGTH, WIDTH), { x: 18, y: 10 });
+test("the shared shift is capped and scaled by role; keepers move at most 2 m", () => {
+  assert.deepEqual(teamShift(LENGTH, WIDTH), { x: 6, y: 3 });
   assert.deepEqual(teamShift(LENGTH / 2, WIDTH / 2), { x: 0, y: 0 });
   const ball = { team: home.id, player_id: "nobody", x: LENGTH, y: WIDTH }; // far corner: the biggest shift
   const points = byId(layout([home, away], home.id, ball, 0)); // no nudging, to measure the shift itself
-  const cap = Math.hypot(18, 10); // the largest shared shift: 18 m along, 10 m across
-  const limit = { GK: Math.hypot(4, 4), defender: 0.5 * cap, midfielder: 0.75 * cap, forward: cap };
+  const cap = Math.hypot(6, 3); // the largest shared shift: 6 m along, 3 m across
+  const limit = { GK: Math.hypot(2, 2), defender: 0.5 * cap, midfielder: 0.75 * cap, forward: cap };
   for (const club of [home, away]) {
     for (const p of club.starters) {
       const [x, y] = slot(club, p);
       const moved = Math.hypot(points[p.id].x - x, points[p.id].y - y);
-      // Never more than the cap; less where the pitch's edge stops the shape.
       assert.ok(moved <= limit[role(p.position)] + 1e-9, `${p.id} moved ${moved.toFixed(2)} m`);
     }
   }
@@ -52,7 +51,7 @@ test("the shared shift is capped and scaled by role; keepers move at most 4 m", 
     const [x] = slot(home, p);
     return byId(layout([home], home.id, ball, 0))[p.id].x - x;
   };
-  assert.ok(moved("GK") <= 4 && moved("RCB") < moved("RCM") && moved("RCM") <= moved("RST"));
+  assert.ok(moved("GK") <= 2 && moved("RCB") < moved("RCM") && moved("RCM") < moved("RST"));
 });
 
 test("markers that land on top of each other are nudged at least MIN_GAP apart; the ball holder stays put", () => {

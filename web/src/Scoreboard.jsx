@@ -13,18 +13,14 @@ export default function Scoreboard({ state, status }) {
   if (!state?.match_id) return <div className="scoreboard waiting">{connection}<span>Waiting for kick-off…</span></div>;
 
   const [home, away] = Object.keys(state.score);
-  // A club's two colours as CSS variables, e.g. --primary/--secondary or --home-club/--home-club-2.
-  const colours = (id, a, b) => ({ [a]: CLUBS[id]?.colours.primary, [b]: CLUBS[id]?.colours.secondary });
   const club = (id, side) => (
-    <div className={`club ${side}`} style={colours(id, "--primary", "--secondary")}>
+    <div className={`club ${side}`} style={{ "--primary": CLUBS[id]?.colours.primary, "--secondary": CLUBS[id]?.colours.secondary }}>
       <span className="badge">{CLUBS[id]?.short_name ?? id}</span>
-      {/* The short form ("Calderbrook") fits beside the chat and the feed; the full name is on hover. */}
-      <span className="name" title={state.teams[id]?.name}>{(state.teams[id]?.name ?? id).split(" ")[0]}</span>
+      <span className="name">{state.teams[id]?.name ?? id}</span>
     </div>
   );
   return (
-    <div className="scoreboard" style={{ ...colours(home, "--home-club", "--home-club-2"),
-                                         ...colours(away, "--away-club", "--away-club-2") }}>
+    <div className="scoreboard">
       {connection}
       {club(home, "home")}
       <div className="score" aria-label={`${state.score[home]} to ${state.score[away]}`}>
