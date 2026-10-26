@@ -115,9 +115,36 @@ button, select { font: inherit; color: inherit; }
   font-weight: 600;
   cursor: pointer;
 }
-.toggle::before { content: "🔈 "; }
+.commentary::before { content: "🔈 "; }
 .toggle[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
-.toggle[aria-pressed="true"]::before { content: "🔊 "; }
+.commentary[aria-pressed="true"]::before { content: "🔊 "; }
+
+/* "Catch me up": a modal with the last ten minutes, nothing after the current clock. */
+.catch-up-panel {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 20px 60px var(--shadow);
+}
+.catch-up-panel::backdrop { background: color-mix(in srgb, var(--bg) 70%, transparent); }
+.catch-up-panel header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.catch-up-panel h2 { font-size: 18px; }
+.catch-up-panel header button { padding: 4px 8px; border: 0; background: none; font-size: 16px; cursor: pointer; }
+.catch-up-panel .window { color: var(--text-muted); font-size: 13px; }
+.summary { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.summary div { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 14px; }
+.summary dt { color: var(--text-muted); }
+.summary dd { margin: 0; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.recap-item { padding: 10px 0; border-top: 1px solid var(--border); }
+.recap-item:first-of-type { border-top: 0; }
+.recap-item header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.recap-item .source { margin-left: auto; }
+.recap-item p { font-size: 14px; line-height: 1.55; }
 
 .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; align-self: flex-end; }
 .segmented button {
@@ -185,7 +212,8 @@ button, select { font: inherit; color: inherit; }
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 /* The feed column takes the left column's height and scrolls inside it, instead of stretching the page. */
 .feed-col { position: relative; min-height: 480px; }
-.feed-scroll { position: absolute; inset: 0; overflow-y: auto; padding-right: 4px; }
+.feed-stack { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 12px; }
+.feed-scroll { position: relative; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
 .section-title { margin-bottom: 10px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); }
 
 /* The pitch keeps its real 111:71 box (105 x 68 m plus room for the goals) at any width. */
@@ -296,7 +324,7 @@ button, select { font: inherit; color: inherit; }
   font-weight: 600;
   cursor: pointer;
 }
-.how button::after { content: " ▾"; }
+.how button[aria-expanded]::after { content: " ▾"; }
 .how button[aria-expanded="true"]::after { content: " ▴"; }
 .evidence { margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); font-size: 13px; }
 .evidence div { display: flex; justify-content: space-between; gap: 12px; padding: 2px 0; }
@@ -386,3 +414,108 @@ button, select { font: inherit; color: inherit; }
 /* Arabic overlay and recap text: a font stack that shapes Arabic well. Direction is set on those blocks alone. */
 [lang="ar"] { font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif; }
 [lang="ar"] h2, [lang="ar"] h3, [lang="ar"] p, [lang="ar"] strong { line-height: 1.55; }
+
+/* Match timeline: momentum bars in the club colours (secondary outline, so dark primaries show on dark themes),
+   moment markers, the half-time line and the clock. */
+.timeline-card { margin: -4px 0 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface); }
+.timeline-plot { position: relative; height: 120px; }
+.timeline-plot svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.timeline-plot .bar { fill: var(--primary); stroke: var(--secondary); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.timeline-plot .centre { stroke: var(--text-muted); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.timeline-plot .half { stroke: var(--border); stroke-width: 2; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.timeline-plot .cursor { stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.timeline-plot .side, .timeline-plot .axis {
+  position: absolute;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.timeline-plot .side { left: 0; border: 1px solid var(--secondary); background: var(--primary); color: var(--secondary); }
+.timeline-plot .side.home { top: 0; }
+.timeline-plot .side.away { bottom: 0; }
+.timeline-plot .axis { bottom: -2px; transform: translateX(-50%); color: var(--text-muted); background: var(--surface); }
+.marker {
+  position: absolute;
+  top: calc(50% + var(--offset, 0px));
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 2px solid var(--secondary, var(--surface));
+  border-radius: 50%;
+  background: var(--primary, var(--text-muted));
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  z-index: 1;
+}
+.marker.neutral { border-color: var(--surface); background: var(--text-muted); }
+.marker.goal { width: 20px; height: 20px; border-width: 3px; z-index: 2; }
+.marker:hover, .marker:focus-visible, .marker.on { box-shadow: 0 0 0 3px var(--accent); z-index: 3; }
+.timeline-plot .tip {
+  position: absolute;
+  top: -8px;
+  max-width: min(320px, 70vw);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px var(--shadow);
+  font-size: 13px;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+  z-index: 5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card.selected, .timeline li.selected { outline: 2px solid var(--accent); outline-offset: 2px; }
+.spot-highlight {
+  position: absolute;
+  width: max(22px, 4cqw);
+  height: max(22px, 4cqw);
+  border: 3px solid var(--accent);
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  z-index: 3;
+  pointer-events: none;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@media (max-width: 767px) { .timeline-plot { height: 96px; } }
+
+/* "Ask about this match": under the feed; the answer shows its evidence and who answered. */
+.ask { padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.tabpanel .ask { margin-top: 14px; background: var(--surface-2); }
+.ask form { display: flex; gap: 8px; }
+.ask input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.ask form button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.ask input:disabled, .ask form button:disabled { opacity: 0.6; cursor: wait; }
+.ask-about { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; color: var(--text-muted); }
+.ask-about span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ask-about button { border: 0; background: none; cursor: pointer; font-size: 14px; }
+.ask-answer { margin-top: 10px; }
+.ask-answer p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; }
+.ask-error { margin: 8px 0 0; font-size: 13px; color: var(--warning); }
+.source.declined { border-style: dashed; }
+.how button + button { margin-left: 0; }

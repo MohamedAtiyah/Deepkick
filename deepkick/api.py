@@ -1,4 +1,4 @@
-"""Overlay API: serves the orchestrator's shared match state over FastAPI (/state, /recap, /ws, /speech, /healthz)."""
+"""Overlay API: the orchestrator's shared match state over FastAPI: REST endpoints plus the /ws overlay socket."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal
+from typing import Annotated, Any, AsyncIterator, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, StringConstraints
 
+from deepkick.agents.ask import AskAgent, RateLimiter, ask_facts
 from deepkick.agents.persona import select_overlay
 from deepkick.agents.speech import Speech, spoken_text
 from deepkick.contracts import LANGS, PERSONAS
@@ -24,8 +27,18 @@ def _log_failure(task: asyncio.Task) -> None:
         log.error("stage=api orchestrator stopped: %r", task.exception())
 
 
+class AskRequest(BaseModel):
+    """A viewer's question: 3-200 characters after stripping, in a persona and language, optionally about one overlay."""
+
+    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=200)]
+    persona: Literal["analyst", "casual", "player"] = "casual"
+    lang: Literal["en", "ar"] = "en"
+    overlay_id: str | None = None
+
+
 def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[dict[str, Any]] | None = None,
-               speech: Speech | None = None) -> FastAPI:
+               speech: Speech | None = None, asker: AskAgent | None = None,
+               limiter: RateLimiter | None = None) -> FastAPI:
     """Build the API. With no arguments, startup runs an orchestrator on REPLAY_FILE if set, else on Event Hubs."""
 
     @asynccontextmanager
@@ -37,6 +50,8 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         app.state.mode = "injected" if events else "replay" if replay else "live"
         app.state.orchestrator = orchestrator or Orchestrator()
         app.state.speech = speech or Speech.from_env()
+        app.state.asker = asker or AskAgent()
+        app.state.limiter = limiter or RateLimiter()
         stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "30"))) if replay
                             else live_events())
         task = asyncio.create_task(app.state.orchestrator.run(stream))
@@ -51,13 +66,25 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         """The current match state: score, clock, team and player stats."""
         return app.state.orchestrator.snapshot()
 
+    @app.get("/timeline")
+    def timeline(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
+                 club: str | None = None, player: str | None = None) -> dict[str, Any]:
+        """Per-minute momentum (home minus away) and the released moments, up to the current clock only."""
+        return app.state.orchestrator.timeline({"persona": persona, "lang": lang, "favourite_club": club,
+                                                "favourite_player": player})
+
     @app.get("/recap")
-    def recap(persona: Literal["analyst", "casual", "player"] | None = None, lang: Literal["en", "ar"] = "en",
-              limit: int | None = Query(None, ge=1)) -> list[dict[str, Any]]:
-        """Overlays released so far, newest first, for one persona (default: the run's) and language."""
+    def recap(persona: Literal["analyst", "casual", "player"] | None = None,
+              lang: Literal["en", "ar"] = "en") -> list[dict[str, Any]]:
+        """The half-time and full-time recaps written so far, newest first, for one persona and language."""
         orchestrator = app.state.orchestrator
-        profile = orchestrator.profile | {"lang": lang} | ({"persona": persona} if persona else {})
-        return orchestrator.history(profile)[::-1][:limit]
+        return orchestrator.recaps(persona or orchestrator.profile["persona"], lang)
+
+    @app.get("/catchup")
+    def catchup(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
+                minutes: int = Query(10, ge=1, le=120)) -> dict[str, Any]:
+        """The score change, moment headlines and momentum of the last `minutes` of match clock, up to now only."""
+        return app.state.orchestrator.catch_up(persona, lang, minutes)
 
     @app.get("/speech/{overlay_id}", responses={200: {"content": {"audio/mpeg": {}}}})
     def speech_clip(overlay_id: str, persona: Literal["analyst", "casual", "player"],
@@ -72,6 +99,22 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         if audio is None:
             raise HTTPException(503, "commentary is unavailable for this overlay")  # the text overlay still ships
         return Response(audio, media_type="audio/mpeg")
+
+    @app.post("/ask")
+    def ask(body: AskRequest, request: Request) -> Any:
+        """Answer a question from the live facts only (and the selected moment), or decline; 429 when over the limit."""
+        # shortcut: X-Forwarded-For can be spoofed to dodge the per-client limit; the global limit still caps the
+        # model calls. Behind Azure Container Apps, trust only the ingress's own hop once it is deployed.
+        client = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                  or (request.client.host if request.client else "unknown"))
+        if not app.state.limiter.allow(client):
+            return JSONResponse({"detail": "Lots of questions right now. Give it a minute and ask again."}, 429)
+        orchestrator = app.state.orchestrator
+        moment = orchestrator.released_moment(body.overlay_id) if body.overlay_id else None
+        if body.overlay_id and moment is None:
+            raise HTTPException(404, f"no released overlay {body.overlay_id!r}")
+        facts = ask_facts(orchestrator.snapshot(), moment)
+        return app.state.asker.answer(body.question, body.persona, facts, body.lang, orchestrator.translator)
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
