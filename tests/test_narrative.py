@@ -57,7 +57,7 @@ def test_good_reply_is_used(goal):
 def test_invented_number_is_rejected_then_falls_back(goal):
     moment, snap = goal
     bad = json.loads(_good_reply(moment))
-    bad["why_it_matters"] = "That makes it 7 goals in 3 games."
+    bad["why_it_matters"] = "That makes it 97 goals in 83 games."  # numbers no match state holds
     client = FakeClient(json.dumps(bad), json.dumps(bad))
     out = NarrativeAgent(client, "m").explain(moment, snap)
     assert out == template_narrative(moment, snap)
@@ -294,7 +294,7 @@ def test_template_covers_every_moment_type(every_type):
 
 def test_fallback_text_keeps_the_players_full_name(detected, every_type):
     named = [(m, s) for m, s in detected if m["player"]] + [every_type["pass_milestone"]]
-    assert {"Rafe Ironsby", "Lucan Ullaby", "Corin Rookwell"} <= {m["player"]["name"] for m, _ in named}
+    assert {"Rafe Ironsby", "Caius Mossington", "Corin Rookwell"} <= {m["player"]["name"] for m, _ in named}
     for moment, snap in named:
         name = moment["player"]["name"]
         assert " " in name

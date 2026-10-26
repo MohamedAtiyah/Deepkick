@@ -18,7 +18,7 @@ from deepkick.orchestrator import Orchestrator, replay_events
 from deepkick.simulator import clock_seconds
 from tests.conftest import AZURE_SETTINGS, REPLAY_PATH
 
-TOTAL = 35  # overlays from the seed-42 replay; none are dropped by the cap
+TOTAL = 44  # overlays from the seed-42 replay; none are dropped by the cap
 
 
 def _failing_client():
@@ -70,14 +70,14 @@ def finished():
 def test_state_is_the_match_snapshot(finished):
     state = finished.get("/state").json()
     assert state["status"] == "full_time" and state["match_clock"] == "90:00"
-    assert state["score"] == {"ASH": 2, "CAL": 3}
+    assert state["score"] == {"ASH": 3, "CAL": 5}
     assert {"goals", "shots", "xg", "possession_pct", "momentum"} <= state["teams"]["ASH"].keys()
 
 
 def test_recap_returns_the_half_and_full_time_recaps_newest_first_per_persona(finished):
     recap = finished.get("/recap").json()  # the run's persona, analyst
     assert [r["type"] for r in recap] == ["full_time", "half_time"]
-    assert [r["match_clock"] for r in recap] == ["90:00", "45:00"] and recap[0]["score"] == {"ASH": 2, "CAL": 3}
+    assert [r["match_clock"] for r in recap] == ["90:00", "45:00"] and recap[0]["score"] == {"ASH": 3, "CAL": 5}
     assert {r["persona"] for r in recap} == {"analyst"} and {r["lang"] for r in recap} == {"en"}
     assert all(r["source"] == "template" and r["text"] for r in recap)  # no Foundry settings in tests
     casual = finished.get("/recap", params={"persona": "casual"}).json()
@@ -90,7 +90,7 @@ def test_healthz_reports_stages_and_counters(finished):
     assert health["status"] == "finished"
     assert health["stages"] == {"ingest": "injected", "interpret": "in_process", "explain": "foundry",
                                 "personalise": "foundry"}
-    assert {"events": 1485, "moments": TOTAL, "emitted": TOTAL, "dropped": 0}.items() <= health["summary"].items()
+    assert {"events": 1497, "moments": TOTAL, "emitted": TOTAL, "dropped": 0}.items() <= health["summary"].items()
 
 
 def test_websocket_sends_the_backlog_then_live_overlays_per_viewer():

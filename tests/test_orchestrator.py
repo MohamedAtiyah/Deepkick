@@ -40,6 +40,11 @@ class SlowClient:
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="not json"))])
 
 
+# The seed-42 replay: events, moments (all released: the cap drops none), moments of priority 2+ that call the
+# model, low-priority moments that use templates, and goals.
+EVENTS, MOMENTS, MODEL, LOW, GOALS = 1497, 44, 22, 22, 8
+
+
 def _run(client=None, **kwargs):
     client = client or SlowClient()
     out = []
@@ -59,10 +64,10 @@ def _minute(overlay):
 
 def test_every_moment_becomes_a_valid_overlay_in_clock_order(baseline):
     orchestrator, out, summary = baseline
-    assert summary["events"] == 1485 and summary["moments"] == 35 == summary["emitted"] == len(out)
+    assert summary["events"] == EVENTS and summary["moments"] == MOMENTS == summary["emitted"] == len(out)
     model = sum(m["priority"] >= MODEL_MIN_PRIORITY for m in _seed42_moments())
-    assert (summary["templated"], summary["model_explained"]) == (35 - model, 0)  # 17 low-priority, no usable reply
-    assert summary["dropped"] == 0 and summary["fallbacks"] == model == 18 and summary["rate_limits"] == 0
+    assert (summary["templated"], summary["model_explained"]) == (MOMENTS - model, 0)  # low priority; no usable reply
+    assert summary["dropped"] == 0 and summary["fallbacks"] == model == MODEL and summary["rate_limits"] == 0
     for overlay in out:
         validate_overlay(overlay)
     assert [o["show_at_ms"] for o in out] == sorted(o["show_at_ms"] for o in out)
@@ -90,7 +95,7 @@ def test_one_moments_timeout_does_not_stall_the_others(baseline):
     others_meanwhile = {c for t, c in client.finished if c != slow and t < slow_done}
     assert len(others_meanwhile) >= 12  # the other workers kept going while it timed out four times
     assert elapsed < 4 * 0.4 + 1.5  # about one slow moment, not a serial queue behind it
-    assert out == baseline[1] and summary["emitted"] == 35  # the timed-out goal still ships, from templates
+    assert out == baseline[1] and summary["emitted"] == MOMENTS  # the timed-out goal still ships, from templates
 
 
 def test_cap_keeps_the_highest_priority_and_never_drops_protected_moments():
@@ -114,9 +119,9 @@ def test_cap_holds_on_the_replay_and_goals_are_never_dropped(cap, caplog):
         if overlay["type"] not in PROTECTED:
             per_minute[_minute(overlay)] = per_minute.get(_minute(overlay), 0) + 1
     assert all(n <= cap for n in per_minute.values())
-    assert sum(o["type"] == "goal" for o in out) == 5
+    assert sum(o["type"] == "goal" for o in out) == GOALS
     assert {"half_time", "full_time"} <= {o["type"] for o in out}
-    assert summary["dropped"] == 35 - summary["emitted"] > 0
+    assert summary["dropped"] == MOMENTS - summary["emitted"] > 0
     assert caplog.text.count("dropped by the cap") == summary["dropped"]
     assert re.search(r"moment_id=ASH-CAL-42-\d{5}-\w+ priority=\d dropped", caplog.text)
 
@@ -133,8 +138,8 @@ def test_each_handoff_and_the_run_summary_are_logged(caplog):
                      caplog.text)
     assert re.search(r"moment_id=ASH-CAL-42-\d{5}-\w+ duration_ms=\d+ fallback=no model=no", caplog.text)
     assert "stage=orchestrator event_id=" not in caplog.text  # one event can produce two moments
-    assert re.search(r"summary events=1485 moments=35 overlays_emitted=35 overlays_dropped=0 model_explained=0 "
-                     r"templated=17 fallbacks=18 rate_limits=0 wall_s=[\d.]+", caplog.text)
+    assert re.search(rf"summary events={EVENTS} moments={MOMENTS} overlays_emitted={MOMENTS} overlays_dropped=0 "
+                     rf"model_explained=0 templated={LOW} fallbacks={MODEL} rate_limits=0 wall_s=[\d.]+", caplog.text)
 
 
 def test_cli_replay_needs_no_azure(monkeypatch, capsys):
@@ -143,8 +148,8 @@ def test_cli_replay_needs_no_azure(monkeypatch, capsys):
     main(["--replay", str(REPLAY_PATH), "--persona", "casual"])
     out, err = capsys.readouterr()
     overlays = [json.loads(line) for line in out.splitlines()]
-    assert len(overlays) == 35 and all(o["persona"] == "casual" for o in overlays)
-    assert json.loads(err.splitlines()[-1])["summary"]["emitted"] == 35
+    assert len(overlays) == MOMENTS and all(o["persona"] == "casual" for o in overlays)
+    assert json.loads(err.splitlines()[-1])["summary"]["emitted"] == MOMENTS
 
 
 def _seed42_moments():
@@ -203,7 +208,7 @@ def test_429s_back_off_and_the_overlays_still_ship_model_written(sleeps):
     _, out, summary = _run(client)
     model = [o for o in out if PRIORITY[o["type"]] >= MODEL_MIN_PRIORITY]
     assert model and all(o["payload"]["headline"].startswith("Model:") for o in model)
-    assert summary["model_explained"] == len(model) == 18 and summary["fallbacks"] == 0
+    assert summary["model_explained"] == len(model) == MODEL and summary["fallbacks"] == 0
     assert summary["rate_limits"] == len(sleeps) == 2 * len(model)  # one 429 per narrative and per persona call
     assert set(sleeps) == {2.0}
 
@@ -213,8 +218,10 @@ def test_priority_one_moments_never_call_the_model(sleeps):
     _, out, summary = _run(client)
     assert client.types and all(PRIORITY[kind] >= MODEL_MIN_PRIORITY for kind in client.types)
     low = [o for o in out if PRIORITY[o["type"]] < MODEL_MIN_PRIORITY]
-    assert {o["type"] for o in low} == {"sprint_milestone", "speed_milestone", "high_press_win", "distance_milestone"}
-    assert summary["templated"] == len(low) == 17 and not any(o["payload"]["headline"].startswith("Model") for o in low)
+    assert {o["type"] for o in low} == {"sprint_milestone", "speed_milestone", "high_press_win", "distance_milestone",
+                                        "pass_milestone"}
+    assert summary["templated"] == len(low) == LOW
+    assert not any(o["payload"]["headline"].startswith("Model") for o in low)
 
 
 def test_default_worker_count_is_three():

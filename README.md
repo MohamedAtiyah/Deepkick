@@ -25,7 +25,8 @@ GitHub Actions ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)) ru
 [`deepkick/simulator.py`](deepkick/simulator.py) plays the 90-minute fixture from `data/league.json` and emits about 1,500 events (`match_metadata`, `pass`, `shot`, `tackle`, `possession_change`, `pressure_event`, `player_run`) that follow the event contract in [`deepkick/contracts.py`](deepkick/contracts.py).
 
 - **Seeded:** the same `--seed` always produces the same match, event ids and timestamps.
-- **Slot-based:** the player who receives, presses or tackles is picked by how close their formation slot is to the ball (outfield slots shift up and down with play), so strikers shoot and centre-backs defend.
+- **Actors near the ball:** the player who receives, presses, tackles or wins the ball is picked from the team-mates whose place in the team shape is nearest the ball, with weight `exp(-(distance / 8 m)²)`. Their place in the shape is their formation slot shifted with the ball: the block slides up to 18 m along and 10 m across, defenders half as far, keepers at most 4 m. So strikers shoot, centre-backs defend, and no player has to cross the field to reach the ball.
+  - **On seed 42:** actors are a median 11.6 m from their place in the shape, and 10% are over 20 m (it was 19.7 m and 49% when slots only shifted along the pitch, with a softer weighting). No actor needs more than 9 m/s to reach the ball from there since the previous event (10% did before).
 - **Pass difficulty:** every pass carries `difficulty` (0–1). It rises with pass length, a pass into the box, pressure on the passer and the number of opposition outfield players the pass goes past (line-breaking). Completion odds fall as difficulty rises.
 - **Shot speed:** every shot carries `speed_kmh` (60–130). Longer shots are struck harder.
 - **Distance covered:** every 5 minutes, and at the end of each half, each starter gets an off-ball `player_run` (`with_ball: false`) with the distance run since the last report. Outfield players cover about 9.5–10.5 km a match and keepers about 5 km, scaled by their stamina rating.
@@ -100,7 +101,7 @@ Each moment has `moment_id, match_id, event_id, type, match_clock, half, team, p
 .venv/bin/python -m deepkick.moments tests/fixtures/replay_ASH-CAL-42.jsonl
 ```
 
-The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprint_milestone=6, goal=5, speed_milestone=4, momentum_swing=4, pressure_spell=4, high_press_win=4, big_chance=3, distance_milestone=3, half_time=1, full_time=1`.
+The summary line shows the mix at a glance. For seed 42 it is `44 moments: sprint_milestone=12, goal=8, momentum_swing=6, pressure_spell=4, speed_milestone=3, high_press_win=3, distance_milestone=3, big_chance=2, half_time=1, pass_milestone=1, full_time=1`.
 
 **Azure service:** none directly. On Day 2 the orchestrator reads Azure Event Hubs, calls `StatsAgent.update` and then `MomentDetector.detect` for each event, and sends the moments to the Narrative Agent.
 
@@ -143,9 +144,9 @@ The summary line shows the mix at a glance. For seed 42 it is `35 moments: sprin
 - **Overlay cap:** a match minute's moments are held until the clock moves past that minute, then cut to at most 3, dropping the lowest moment priority first (ties keep the earlier moment). Goals, half-time and full-time are never dropped. Each drop is logged with its moment id and priority. The cap runs before any model call, so a dropped moment costs nothing.
 - **Explain and Personalise off the hot path:**
   - **Workers:** kept moments go on a queue served by 3 workers (`--workers` to change it). The gpt-5-mini deployment allows 50,000 tokens a minute, or about 25 calls at roughly 2,000 tokens each, so 3 concurrent workers stay inside it.
-  - **Priority 2 and up only:** only moments of detector priority 2 or more (goals, big chances, pressure spells, momentum swings, half-time, full-time) call the model. Priority 1 moments (sprint, speed and distance milestones, high press wins) use the existing templates, so seed 42 makes about 36 model calls instead of about 70.
+  - **Priority 2 and up only:** only moments of detector priority 2 or more (goals, big chances, pressure spells, momentum swings, half-time, full-time) call the model. Priority 1 moments (sprint, speed and distance milestones, high press wins) use the existing templates, so seed 42 makes about 44 model calls instead of about 88.
   - **Per-moment workflow:** each worker runs that moment through its own Agent Framework workflow: `ExplainExecutor` (Narrative Agent), then `PersonaliseExecutor` (Persona Agent). The blocking model calls run in threads.
-  - **Why it's needed:** a narrative call takes 6–10 s and a persona call 6–12 s, and a seed-42 match has 35 moments, so running them one after another would take about 10 minutes.
+  - **Why it's needed:** a narrative call takes 6–10 s and a persona call 6–12 s, and a seed-42 match has 44 moments, so running them one after another would take about 12 minutes.
   - **Timeouts and errors:** a timeout or error in one moment uses that moment's template fallback, and the other workers carry on.
 - **Clock order:** finished overlays are buffered and released in match-clock (`show_at_ms`) order, even when a later moment finishes first.
 - **Half-time and full-time:** these pass through as normal overlays until the recap agent exists.
@@ -426,7 +427,7 @@ curl "localhost:8000/catchup?persona=casual&lang=en&minutes=10"
 ```
 
 **Tests:** [`tests/test_recap.py`](tests/test_recap.py) runs the seed-42 replay with a fake model client. It covers:
-- the full-time recap naming all 5 goals with scorer and minute (and the half-time recap leaving out the second-half goal);
+- the full-time recap naming all 8 goals with scorer and minute (and the half-time recap leaving out the second-half goal);
 - one model call writing all three recaps;
 - one failed version templated alone;
 - timeouts falling back to the template after one retry;
