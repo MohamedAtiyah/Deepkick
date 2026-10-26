@@ -77,6 +77,22 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         """The current match state: score, clock, team and player stats."""
         return app.state.orchestrator.snapshot()
 
+    @app.get("/events")
+    def event_feed(after: int | None = Query(None, ge=0), limit: int = Query(300, ge=1, le=1000)) -> dict[str, Any]:
+        """Events the pitch animates, in order: from index `after`, or the last 30 for a viewer joining late.
+
+        Spoiler-safe by construction: only events the orchestrator has already applied, so nothing past the clock.
+        """
+        applied = app.state.orchestrator.events
+        total = len(applied)
+        start = max(0, total - 30) if after is None else min(after, total)
+        chunk = applied[start:start + limit]
+        home = next((e["payload"]["home"]["id"] for e in applied[:1] if e["event_type"] == "match_metadata"), None)
+        return {"home": home, "next": start + len(chunk), "events": [
+            {k: e[k] for k in ("event_id", "match_clock", "half", "event_type", "team", "player", "coordinates")}
+            | {"payload": {k: v for k, v in e["payload"].items() if k not in ("lineups", "stadium", "referee")}}
+            for e in chunk]}
+
     @app.get("/timeline")
     def timeline(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
                  club: str | None = None, player: str | None = None) -> dict[str, Any]:

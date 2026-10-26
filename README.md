@@ -198,6 +198,7 @@ The 429 backoff itself (schedule, Retry-After, and not using up the normal attem
 | Endpoint | What it returns |
 |---|---|
 | `GET /state` | the current match snapshot: score, clock, status, ball position, team stats with momentum, player stats |
+| `GET /events?after=&limit=` | the events the pitch animates, in order from index `after` (or the last 30 for a viewer joining late), with `next` for the following poll. Only events already applied, so never past the clock |
 | `GET /timeline?persona=&lang=&club=&player=` | per-minute momentum (home minus away) and the released moments (`overlay_id`, minute, type, priority, team, coordinates), up to the current clock only. See [Match timeline](#11-match-timeline) |
 | `POST /chat` | `{messages, persona, lang}` → `{answer, cards, tools_used, data_until_clock, source}`: the match chat, answered only from spoiler-safe match tools. 422 for a bad request, 429 over the rate limit. See [Ask the match](#12-ask-the-match) |
 | `GET /recap?persona=&lang=` | the half-time and full-time recaps written so far, newest first, for `analyst`, `casual` or `player` (default: the run's persona) in `en` or `ar` (default `en`). See [Recap and catch-up](#10-recap-and-catch-up) |
@@ -250,11 +251,26 @@ curl localhost:8000/healthz
 - **Score strip:** clubs by short name in their fictional colours, the score, the match clock and period from `/state` (polled every second), and the feed's connection state as a live dot (Live, Connecting or Reconnecting). `/ws` reconnects on its own after 1 s, 2 s, 4 s, then every 8 s.
   - **Clock:** ticks smoothly between polls, at the rate the last two polls showed. A 30x replay counts up visibly instead of jumping 30 seconds at a time, and the clock stops at half-time and full-time.
 - **Pitch:** drawn to real proportions on the data's 105 × 68 metre system, as an SVG whose units are metres. It has goals 7.32 m wide outside each goal line, 40.3 × 16.5 m penalty areas, 18.3 × 5.5 m six-yard boxes, penalty spots 11 m out, D arcs and the centre circle at 9.15 m, 1 m corner arcs, the halfway line and the centre spot. The stripes are mown. The pitch keeps its landscape aspect ratio at any width.
-  - **Players:** all 22 starters, in club colours with shirt numbers. Markers are placed by converting metres to percentages of the same box, with the home side attacking to the right. The layout rules live in [`web/src/pitchLayout.js`](web/src/pitchLayout.js):
-    - Everyone sits on their formation slot from `data/league.json`, and the player on the ball is drawn at the event's coordinates. The events only carry coordinates for the player involved.
-    - Both teams share one small shift toward the ball, capped at 6 m along the pitch and 3 m across, so the shape slides as a unit. Defenders move half of it, midfielders three quarters and forwards all of it; keepers stay on their line, moving at most 2 m.
-    - Markers that land within 3 m of each other are nudged apart, but the player on the ball never moves.
-  - **Movement:** players ease to their spots over 400 ms and the ball glides over 600 ms, so nothing teleports.
+  - **Players:** all 22 starters, in club colours with their shirt numbers (the position code if a player had none). The ball carrier wears a ring. Positions are in metres with the home side attacking to the right, converted to percentages of the same box.
+  - **Team shape:** off the ball, players head for their formation slot from `data/league.json`, shifted as a block toward the ball: up to 18 m along the pitch and 10 m across. Defenders move half of the shift, midfielders three quarters and forwards all of it. Keepers stay within 4 m of their line. Markers within 3 m of each other are nudged apart, and nothing leaves the pitch. The rules live in [`web/src/pitchLayout.js`](web/src/pitchLayout.js).
+  - **Motion, from the event sequence:** the pitch reads `GET /events` (only events already applied, so never past the clock) every 400 ms. [`web/src/motion.js`](web/src/motion.js) turns the events into steps, as pure, tested functions:
+    - **Pass:** a completed pass (or, without that flag, one followed by a team-mate's event) travels to the team-mate.
+    - **Interception:** a failed pass followed by an opponent's possession change, tackle or pressure heads for its target, and the opponent runs to the cut-out point and takes it.
+    - **Runs:** a `player_run` moves the runner from start to end at the run's own speed (`distance_m` over `speed_kmh`). The 5-minute tracking summaries are not runs.
+    - **Shots:** the ball flies to the goalmouth, wide of a post when off target, or stops short when blocked. A goal pulses the net.
+    - **Restarts:** after a goal, a save or a tackle, the ball travels to the new player. It never appears there.
+  - **Rendering:** a `requestAnimationFrame` loop moves the markers directly, with no React render per frame.
+    - Every player moves toward a target and never snaps. The cap is a sprinter's 9 m/s of *match* time times the replay rate (measured from how fast the event clock advances): 9 m/s on screen live, 45 m/s at 5x, and never more than 60 m/s, even while catching up (90 m/s on a scripted run).
+    - The ball eases out along a slight arc for 300–800 ms, scaled by distance.
+    - A step waits for its passer, shooter or carrier to reach the ball, and a player keeps a new ball about 300 ms (a first touch) before using it.
+    - A carried ball sits just ahead of the carrier's feet in the direction he's moving, and only moves with him.
+    - The ball changes players only by travelling between them.
+  - **Catching up:** steps play from a queue in event order. More than 2 s behind, the queue plays up to 4x faster (ball flights at most 2x). More than 8 s behind, the stale backlog is dropped and play continues from the latest steps, with the ball travelling on from where it is. So the pitch never lags the overlays.
+    - At the demo's 30x replay (about 10 events a real second) it mostly shows a sped-up highlight. At 5x or live, every pass and run plays out.
+  - **Reduced motion:** with `prefers-reduced-motion`, every step lands at once and markers snap.
+  - **Checking it:** `.venv/bin/python -m scripts.motion_check tests/fixtures/replay_ASH-CAL-42.jsonl` measures how far each player moves between the events that involve them (seed 42: 2 of 1,669 moves are over 9 m/s).
+
+  ![The pitch at 5x replay: passes, interceptions and runs played out from the events](docs/pitch-motion.gif)
 - **Lower-third:** one overlay at a time on the pitch, showing its headline, detail and why for its own `duration_ms`. It never appears before the match clock reaches its `show_at_ms`. When several are due, the highest `priority` goes first and the rest queue. An overlay that has waited more than one match minute (counted from its `show_at_ms`, or from when it reached the browser if that was later) is skipped on the pitch, since the feed already has it; goals are never skipped. Without this, at 30x replay each 6–8 second lower-third holds the screen for 3–4 match minutes and the queue falls about 8 minutes behind; with it, lower-thirds trail the clock by 1–3 minutes, mostly the pipeline's own delay. The queue also keeps only the newest 4, so a late viewer's backlog doesn't play for minutes.
 - **Live feed:** every overlay whose moment has come, as cards with a type chip, match clock, headline, detail and why, newest first. A card the model wrote shows an "AI-explained" badge (template cards show none) and a collapsible **How we know** list of the facts it cites (see [Explainability](#8-explainability)). It is an `aria-live="polite"` region, so screen readers announce new moments. The lower-third is not, so nothing is announced twice.
 - **Tabs:** Moments (the feed on narrow screens; a one-line timeline beside the full feed on desktop), Stats (head-to-head team stats from `/state`: possession, shots, shots on target, expected goals, passes, pass accuracy, tackles and pressures won, top shot speed and momentum), Lineups (formation, manager, starting eleven and bench from `data/league.json`) and Recap (the half-time and full-time recaps from `/recap` for the current persona and language, with an "AI-explained" or "Stats template" badge, refreshed every 5 seconds). The tabs follow the WAI-ARIA pattern: arrow keys, Home and End move between them.
@@ -273,11 +289,12 @@ REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl .venv/bin/uvicorn deepkick.ap
 # Terminal 2: the broadcast view on http://localhost:5173
 cd web && npm install && npm run dev
 
-# The pitch layout and theme storage rules have tests (Node's built-in runner, no extra dependency)
+# The pitch layout, pitch motion (passes, interceptions, runs, shots, catch-up) and theme storage rules have tests
+# (Node's built-in runner, no extra dependency)
 cd web && npm test
 ```
 
-In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/timeline`, `/chat`, `/recap`, `/catchup`, `/healthz`, `/speech` and `/ws` to `localhost:8000`. `npm run build` writes a static site to `web/dist/` for Azure Static Web Apps.
+In development, [`web/vite.config.js`](web/vite.config.js) proxies `/state`, `/events`, `/timeline`, `/chat`, `/recap`, `/catchup`, `/healthz`, `/speech` and `/ws` to `localhost:8000`. `npm run build` writes a static site to `web/dist/` for Azure Static Web Apps.
 
 ## 7. Personalise: Persona Agent
 
