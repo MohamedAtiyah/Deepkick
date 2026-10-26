@@ -173,82 +173,50 @@ Off by default; a 10 s timeout and one retry, then silence (the text overlay sti
 
 ## Run it locally
 
-```bash
-python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env    # optional: FOUNDRY_*, AZURE_SPEECH_*, EVENTHUB_*; without them everything uses templates
-(cd web && npm install)
-```
-
-```bash
-# Terminal 1: the API, replaying seed 42 at 30x (90 minutes in 3)
-REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl REPLAY_SPEED=30 .venv/bin/uvicorn deepkick.api:app --port 8000
-```
-
-```bash
-# Terminal 2: the broadcast view on http://localhost:5173
-cd web && npm run dev
-```
-
-## Deploy a live demo to Azure
-
-One Azure Container App runs everything: the [`Dockerfile`](Dockerfile) builds the site and serves it from the API, so the page, the REST endpoints and the WebSocket share one URL. Azure builds the image, so Docker isn't needed locally.
-
-1. **Install the Azure CLI and sign in** (once):
+1. **Install** (Python 3.11 and Node 22):
 
    ```bash
-   brew install azure-cli
+   python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt && (cd web && npm install)
+   ```
+
+2. **Settings (optional).** Copy the example and fill in the Azure keys you have. Without them everything still runs: text comes from the stats templates, and commentary stays silent.
+
+   ```bash
+   cp .env.example .env
+   ```
+
+3. **Start the API**, replaying the seed-42 match at 30x real time (90 minutes in 3):
+
+   ```bash
+   REPLAY_FILE=tests/fixtures/replay_ASH-CAL-42.jsonl REPLAY_SPEED=30 .venv/bin/uvicorn deepkick.api:app --port 8000
+   ```
+
+4. **Start the broadcast view** in a second terminal, then open http://localhost:5173:
+
+   ```bash
+   cd web && npm run dev
+   ```
+
+5. **Run the tests** (no network needed; Azure settings are blanked for the whole test session):
+
+   ```bash
+   .venv/bin/python -m pytest -q
    ```
 
    ```bash
-   az login && az extension add --name containerapp --upgrade && az provider register -n Microsoft.App && az provider register -n Microsoft.OperationalInsights
+   cd web && npm test && npm run build
    ```
 
-2. **Build and deploy** from the repo root (pick a region near you, for example `uaenorth`):
+   339 Python tests and 23 web tests, all against a fixed-seed replay ([`tests/fixtures/replay_ASH-CAL-42.jsonl`](tests/fixtures/replay_ASH-CAL-42.jsonl)) with fake model clients. GitHub Actions runs the Python suite on every push. [`scripts/chat_eval.py`](scripts/chat_eval.py) asks 12 fixed questions of the real Foundry model: last run 11 of 12 grounded, median 5.9 s (the declined one was a prompt injection).
 
-   ```bash
-   az containerapp up --name deepkick --resource-group deepkick-rg --location uaenorth --source . --ingress external --target-port 8000
-   ```
+## Azure services
 
-3. **Add the keys as secrets.** This reads them from your `.env` into the shell, so they are never typed or committed:
-
-   ```bash
-   set -a; source .env; set +a; az containerapp secret set -n deepkick -g deepkick-rg --secrets foundry-key="$FOUNDRY_API_KEY" speech-key="$AZURE_SPEECH_KEY"
-   ```
-
-   ```bash
-   az containerapp update -n deepkick -g deepkick-rg --min-replicas 1 --max-replicas 1 --set-env-vars FOUNDRY_ENDPOINT="$FOUNDRY_ENDPOINT" FOUNDRY_MODEL_DEPLOYMENT="$FOUNDRY_MODEL_DEPLOYMENT" FOUNDRY_API_KEY=secretref:foundry-key AZURE_SPEECH_REGION="$AZURE_SPEECH_REGION" AZURE_SPEECH_KEY=secretref:speech-key
-   ```
-
-   Keep exactly one replica: the match state lives in memory, and one orchestrator serves every viewer.
-
-4. **Get the URL** and put it at the top of this README and in the GitHub repo's *About → Website*:
-
-   ```bash
-   az containerapp show -n deepkick -g deepkick-rg --query properties.configuration.ingress.fqdn -o tsv
-   ```
-
-5. **Replay the match again** for a new visitor or for judging (the replay plays once, 3 minutes at 30x; set `REPLAY_SPEED=10` for 9 minutes):
-
-   ```bash
-   az containerapp revision restart -n deepkick -g deepkick-rg --revision $(az containerapp show -n deepkick -g deepkick-rg --query properties.latestRevisionName -o tsv)
-   ```
-
-6. **Stop paying** after judging:
-
-   ```bash
-   az group delete -n deepkick-rg --yes
-   ```
-
-The public chat spends Foundry tokens, so it is rate limited (6 questions per minute per visitor, 30 in total).
-
-## Tests
-
-```bash
-.venv/bin/python -m pytest -q                 # 339 tests, ~30 s, no network: Azure settings are blanked for the session
-cd web && npm test && npm run build           # 23 tests: pitch layout, motion, overlay timing, theme
-```
-
-Everything is tested against a fixed-seed replay ([`tests/fixtures/replay_ASH-CAL-42.jsonl`](tests/fixtures/replay_ASH-CAL-42.jsonl)) with fake model clients. GitHub Actions runs the Python suite on every push. [`scripts/chat_eval.py`](scripts/chat_eval.py) runs 12 fixed questions against the real deployment: last run 11 of 12 grounded, median 5.9 s (the declined one was a prompt injection).
+| Service | What Deepkick uses it for | Settings in `.env` | Without it |
+|---|---|---|---|
+| **Microsoft Foundry** (gpt-5-mini, Global Standard, 50,000 tokens per minute) | Writes why each moment matters (Narrative Agent), the three persona versions (Persona Agent), the half-time and full-time recaps (Recap Agent), and answers the match chat by calling match tools. Every reply is checked against the facts before it is shown. | `FOUNDRY_ENDPOINT`, `FOUNDRY_MODEL_DEPLOYMENT`, `FOUNDRY_API_KEY` | Every moment and recap uses its stats template; the chat declines politely. |
+| **Microsoft Agent Framework** | Runs each moment through its Explain → Personalise workflow inside the orchestrator, with several moments in flight at once. | none (a Python library) | Required; it is part of the app. |
+| **Azure Event Hubs** (Basic tier) | Carries the live event stream: the simulator sends with `--send`, and the orchestrator is the one consumer that fans out to every viewer. | `EVENTHUB_CONNECTION_STRING`, `EVENTHUB_NAME` | Use a replay file (`REPLAY_FILE`), as in the steps above. |
+| **Azure AI Speech** | Speaks each overlay's headline and detail in an en-GB neural voice per persona when Commentary is on. | `AZURE_SPEECH_KEY`, `AZURE_SPEECH_REGION` | Commentary stays silent; the text overlays are unaffected. |
 
 ## Project layout
 
@@ -259,18 +227,9 @@ deepkick/stats.py         Stats Agent
 deepkick/moments.py       moment detector
 deepkick/agents/          narrative, persona, recap, chat (+ match tools), speech
 deepkick/orchestrator.py  Agent Framework workflow
-deepkick/api.py           FastAPI: overlays, state, events, recap, catch-up, timeline, chat, speech, the built site
+deepkick/api.py           FastAPI: overlays, state, events, recap, catch-up, timeline, chat, speech
 web/                      React broadcast view
 tests/                    pytest suite and the seed-42 replay
+scripts/                  chat evaluation and pitch motion check
 docs/REFERENCE.md         full design notes for every stage
 ```
-
-## Azure services
-
-| Service | Used for |
-|---|---|
-| Microsoft Foundry (gpt-5-mini) | narratives, personas, recaps, match chat |
-| Microsoft Agent Framework | the Explain → Personalise workflow per moment |
-| Azure Event Hubs | live event stream (replay files work without it) |
-| Azure AI Speech | spoken commentary |
-| Azure Container Apps | the live demo |
