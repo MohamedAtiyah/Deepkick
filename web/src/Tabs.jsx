@@ -1,18 +1,13 @@
-import { useEffect, useRef, useState } from "react";
-import Feed from "./Feed.jsx";
+import { useRef, useState } from "react";
 import Stats from "./Stats.jsx";
 import Lineups from "./Lineups.jsx";
 import Recap from "./Recap.jsx";
 
-const TABS = [["moments", "Moments"], ["stats", "Stats"], ["lineups", "Lineups"], ["recap", "Recap"]];
+const TABS = [["stats", "Stats"], ["recap", "Recap"], ["lineups", "Lineups"]];
 
-/** Moments, Stats, Lineups and Recap under the pitch. `feed` is the full feed when it has no column of its own. */
-export default function Tabs({ state, profile, overlays, feed, selected }) {
-  const [active, setActive] = useState("moments");
-  const hasFeed = Boolean(feed);
-  useEffect(() => {
-    if (selected && hasFeed) setActive("moments"); // a moment picked on the timeline: show its card
-  }, [selected, hasFeed]);
+/** Stats, Recap and Lineups under the pitch; the Moments feed has a place of its own. */
+export default function Tabs({ state, profile }) {
+  const [active, setActive] = useState("stats");
   const buttons = useRef({});
 
   // Arrow keys, Home and End move between tabs, as in the WAI-ARIA tabs pattern.
@@ -38,12 +33,9 @@ export default function Tabs({ state, profile, overlays, feed, selected }) {
         ))}
       </div>
       <div className="tabpanel" role="tabpanel" id={`panel-${active}`} aria-labelledby={`tab-${active}`} tabIndex={0}>
-        {active === "moments" &&
-          (feed ?? <Feed overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} compact
-                         selected={selected?.key} />)}
         {active === "stats" && <Stats state={state} />}
         {active === "lineups" && <Lineups state={state} />}
-        {active === "recap" && <Recap persona={profile.persona} lang={profile.lang} />}
+        {active === "recap" && <Recap persona={profile.persona} />}
       </div>
     </section>
   );

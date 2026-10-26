@@ -6,7 +6,7 @@ export function clockMs(matchClock) {
   return (minutes * 60 + seconds) * 1000;
 }
 
-// overlay_id is "<moment_id>-<persona>-<lang>"; the moment is what stays the same across personas.
+// overlay_id is "<moment_id>-<persona>-en"; the moment is what stays the same across personas.
 export const momentKey = (overlay) => overlay.overlay_id.split("-").slice(0, -2).join("-");
 
 export function useMatchState(everyMs = 1000) {
@@ -34,9 +34,7 @@ export function useOverlaySocket(profile, onOverlay) {
   handler.current = onOverlay;
 
   useEffect(() => {
-    const params = new URLSearchParams({ persona: profile.persona, lang: profile.lang });
-    if (profile.club) params.set("club", profile.club);
-    if (profile.player) params.set("player", profile.player);
+    const params = new URLSearchParams({ persona: profile.persona });
     const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?${params}`;
     let socket, retry, attempt = 0, stopped = false;
 
@@ -61,7 +59,7 @@ export function useOverlaySocket(profile, onOverlay) {
       clearTimeout(retry);
       socket.close();
     };
-  }, [profile.persona, profile.club, profile.player, profile.lang]);
+  }, [profile.persona]);
 
   return status;
 }
@@ -101,14 +99,6 @@ export function useSmoothClock(state) {
   return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
 }
 
-// In right-to-left text a score like "1-0" after an Arabic word displays reversed ("0-1"): the hyphen does not join
-// Arabic-context numbers into one run the way "." does. Split scores out so the view can isolate them LTR.
-const SCORE = /(\d+(?:\.\d+)?(?:\s?[-–]\s?\d+(?:\.\d+)?)+)/;
-
-/** The text as [part, isScore] pairs, scores (hyphenated number groups) marked so they can render left-to-right. */
-export function splitScores(text) {
-  return text.split(SCORE).filter(Boolean).map((part) => [part, SCORE.test(part) && /^\d/.test(part)]);
-}
 
 // At replay speed each lower-third holds the screen for many match minutes, so the queue falls behind the clock.
 const STALE_MS = 60_000; // waited over a match minute: the feed already has it, so skip it on the pitch

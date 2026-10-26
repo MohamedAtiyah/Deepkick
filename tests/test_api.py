@@ -78,7 +78,7 @@ def test_recap_returns_the_half_and_full_time_recaps_newest_first_per_persona(fi
     recap = finished.get("/recap").json()  # the run's persona, analyst
     assert [r["type"] for r in recap] == ["full_time", "half_time"]
     assert [r["match_clock"] for r in recap] == ["90:00", "45:00"] and recap[0]["score"] == {"ASH": 3, "CAL": 5}
-    assert {r["persona"] for r in recap} == {"analyst"} and {r["lang"] for r in recap} == {"en"}
+    assert {r["persona"] for r in recap} == {"analyst"}
     assert all(r["source"] == "template" and r["text"] for r in recap)  # no Foundry settings in tests
     casual = finished.get("/recap", params={"persona": "casual"}).json()
     assert {r["persona"] for r in casual} == {"casual"} and casual[0]["text"] != recap[0]["text"]
@@ -117,11 +117,10 @@ def test_websocket_sends_the_backlog_then_live_overlays_per_viewer():
     assert boosted and all(c["type"] != "goal" or c["priority"] == 5 for c in casual_all)
 
 
-def test_websocket_rejects_an_unknown_persona_or_language(finished):
-    for query in ("persona=coach", "lang=fr"):
-        with pytest.raises(WebSocketDisconnect):
-            with finished.websocket_connect(f"/ws?{query}") as ws:
-                ws.receive_json()
+def test_websocket_rejects_an_unknown_persona(finished):
+    with pytest.raises(WebSocketDisconnect):
+        with finished.websocket_connect("/ws?persona=coach") as ws:
+            ws.receive_json()
 
 
 def test_default_app_replays_REPLAY_FILE_with_no_azure(monkeypatch):
@@ -135,16 +134,14 @@ def test_default_app_replays_REPLAY_FILE_with_no_azure(monkeypatch):
     assert health["summary"]["emitted"] == TOTAL
 
 
-def test_a_default_replay_never_builds_a_foundry_translator_or_speech_client(monkeypatch):
+def test_a_default_replay_never_builds_a_foundry_or_speech_client(monkeypatch):
     import openai
 
     from deepkick.agents.speech import Speech
-    from deepkick.agents.translate import Translator
 
     assert all(os.environ[key] == "" for key in AZURE_SETTINGS)  # conftest's guard, and "" means not configured
     built = []
     monkeypatch.setattr(openai, "OpenAI", lambda *a, **k: built.append("foundry"))
-    monkeypatch.setattr(Translator, "__init__", lambda *a, **k: built.append("translator"))
     monkeypatch.setattr(Speech, "__init__", lambda *a, **k: built.append("speech"))
     monkeypatch.setenv("REPLAY_FILE", str(REPLAY_PATH))
     monkeypatch.setenv("REPLAY_SPEED", "0")
@@ -162,32 +159,3 @@ def test_default_app_paces_the_replay_so_state_tracks_the_stream(monkeypatch):
         state, health = client.get("/state").json(), client.get("/healthz").json()
     assert health["status"] == "running"
     assert state["status"] == "kickoff" and "00:20" <= state["match_clock"] <= "01:00"  # not 90:00 and full time
-
-
-def test_arabic_overlays_over_ws_and_recap_with_a_mocked_translator():
-    from tests.test_translate import ARABIC, fake_translator
-
-    translator, requests = fake_translator()
-    client = _failing_client()
-    orchestrator = Orchestrator(NarrativeAgent(client, "m"), PersonaAgent(client, "m"), translator=translator)
-    with TestClient(create_app(orchestrator, replay_events(REPLAY_PATH))) as api:
-        _wait_until(lambda: api.get("/healthz").json()["status"] == "finished")
-        with api.websocket_connect("/ws?persona=casual&lang=ar") as arabic, \
-                api.websocket_connect("/ws?persona=casual&lang=en") as english:
-            ar = [arabic.receive_json() for _ in range(TOTAL)]
-            en = [english.receive_json() for _ in range(TOTAL)]
-        recap = api.get("/recap", params={"persona": "casual", "lang": "ar"}).json()
-        assert api.get("/recap", params={"lang": "es"}).status_code == 422
-        with pytest.raises(WebSocketDisconnect):
-            with api.websocket_connect("/ws?lang=es") as ws:
-                ws.receive_json()
-    for a, e in zip(ar, en):
-        validate_overlay(a)
-        assert a["lang"] == "ar" and a["payload"]["headline"] == ARABIC + e["payload"]["headline"]
-        assert a["payload"]["player"] == e["payload"]["player"]  # names stay as they are
-        # Evidence labels are translated with the text; values stay exactly the English (fact) values.
-        assert [x["label"] for x in a["payload"]["evidence"]] == [ARABIC + x["label"] for x in e["payload"]["evidence"]]
-        assert [x["value"] for x in a["payload"]["evidence"]] == [x["value"] for x in e["payload"]["evidence"]]
-        assert a["payload"]["source"] == e["payload"]["source"] == "template"  # the model client always fails here
-    assert [r["lang"] for r in recap] == ["ar", "ar"] and all(r["text"].startswith(ARABIC) for r in recap)
-    assert len(requests) <= TOTAL + 2  # one batched call per moment and per recap, fewer once strings repeat

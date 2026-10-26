@@ -11,13 +11,14 @@ from typing import Annotated, Any, AsyncIterator, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints
 
-from deepkick.agents.ask import AskAgent, RateLimiter, ask_facts
+from deepkick.agents.chat import ChatAgent
 from deepkick.agents.persona import select_overlay
 from deepkick.agents.speech import Speech, spoken_text
-from deepkick.contracts import LANGS, PERSONAS
+from deepkick.contracts import PERSONAS
 from deepkick.orchestrator import Orchestrator, live_events, replay_events
+from deepkick.ratelimit import RateLimiter
 
 log = logging.getLogger("deepkick.api")
 
@@ -27,17 +28,25 @@ def _log_failure(task: asyncio.Task) -> None:
         log.error("stage=api orchestrator stopped: %r", task.exception())
 
 
-class AskRequest(BaseModel):
-    """A viewer's question: 3-200 characters after stripping, in a persona and language, optionally about one overlay."""
+HISTORY = 6  # messages of the conversation the server keeps
 
-    question: Annotated[str, StringConstraints(strip_whitespace=True, min_length=3, max_length=200)]
+
+class ChatMessage(BaseModel):
+    """One message of the conversation the client sends: the viewer's or a previous answer, at most 300 characters."""
+
+    role: Literal["user", "assistant"]
+    content: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]
+
+
+class ChatRequest(BaseModel):
+    """A chat turn: the conversation so far (the last message is the viewer's question) and the persona."""
+
+    messages: Annotated[list[ChatMessage], Field(min_length=1)]
     persona: Literal["analyst", "casual", "player"] = "casual"
-    lang: Literal["en", "ar"] = "en"
-    overlay_id: str | None = None
 
 
 def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[dict[str, Any]] | None = None,
-               speech: Speech | None = None, asker: AskAgent | None = None,
+               speech: Speech | None = None, chat: ChatAgent | None = None,
                limiter: RateLimiter | None = None) -> FastAPI:
     """Build the API. With no arguments, startup runs an orchestrator on REPLAY_FILE if set, else on Event Hubs."""
 
@@ -50,7 +59,8 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         app.state.mode = "injected" if events else "replay" if replay else "live"
         app.state.orchestrator = orchestrator or Orchestrator()
         app.state.speech = speech or Speech.from_env()
-        app.state.asker = asker or AskAgent()
+        app.state.chat = chat or ChatAgent()
+        app.state.limiter = limiter or RateLimiter(per_client=6, total=30)
         app.state.limiter = limiter or RateLimiter()
         stream = events or (replay_events(Path(replay), float(os.environ.get("REPLAY_SPEED", "30"))) if replay
                             else live_events())
@@ -67,42 +77,42 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         return app.state.orchestrator.snapshot()
 
     @app.get("/timeline")
-    def timeline(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
-                 club: str | None = None, player: str | None = None) -> dict[str, Any]:
+    def timeline(persona: Literal["analyst", "casual", "player"] = "casual", club: str | None = None,
+                 player: str | None = None) -> dict[str, Any]:
         """Per-minute momentum (home minus away) and the released moments, up to the current clock only."""
-        return app.state.orchestrator.timeline({"persona": persona, "lang": lang, "favourite_club": club,
+        return app.state.orchestrator.timeline({"persona": persona, "favourite_club": club,
                                                 "favourite_player": player})
 
     @app.get("/recap")
-    def recap(persona: Literal["analyst", "casual", "player"] | None = None,
-              lang: Literal["en", "ar"] = "en") -> list[dict[str, Any]]:
-        """The half-time and full-time recaps written so far, newest first, for one persona and language."""
+    def recap(persona: Literal["analyst", "casual", "player"] | None = None) -> list[dict[str, Any]]:
+        """The half-time and full-time recaps written so far, newest first, for one persona."""
         orchestrator = app.state.orchestrator
-        return orchestrator.recaps(persona or orchestrator.profile["persona"], lang)
+        return orchestrator.recaps(persona or orchestrator.profile["persona"])
 
     @app.get("/catchup")
-    def catchup(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
+    def catchup(persona: Literal["analyst", "casual", "player"] = "casual",
                 minutes: int = Query(10, ge=1, le=120)) -> dict[str, Any]:
         """The score change, moment headlines and momentum of the last `minutes` of match clock, up to now only."""
-        return app.state.orchestrator.catch_up(persona, lang, minutes)
+        return app.state.orchestrator.catch_up(persona, minutes)
 
     @app.get("/speech/{overlay_id}", responses={200: {"content": {"audio/mpeg": {}}}})
-    def speech_clip(overlay_id: str, persona: Literal["analyst", "casual", "player"],
-                    lang: Literal["en", "ar"]) -> Response:
+    def speech_clip(overlay_id: str, persona: Literal["analyst", "casual", "player"]) -> Response:
         """The overlay's headline and detail spoken as MP3: 404 for an unknown overlay, 503 if synthesis failed."""
-        overlay = app.state.orchestrator.released_overlay(overlay_id, persona, lang)
+        overlay = app.state.orchestrator.released_overlay(overlay_id, persona)
         if overlay is None:
             raise HTTPException(404, f"no released overlay {overlay_id!r}")
         voice = app.state.speech
-        audio = voice and voice.synthesize(spoken_text(overlay["payload"]), persona, lang, overlay_id=overlay_id,
-                                           event_id=overlay_id.rsplit("-", 3)[0])  # id: <event>-<type>-<persona>-<lang>
+        audio = voice and voice.synthesize(spoken_text(overlay["payload"]), persona, overlay_id=overlay_id,
+                                           event_id=overlay_id.rsplit("-", 3)[0])  # id: <event>-<type>-<persona>-en
         if audio is None:
             raise HTTPException(503, "commentary is unavailable for this overlay")  # the text overlay still ships
         return Response(audio, media_type="audio/mpeg")
 
-    @app.post("/ask")
-    def ask(body: AskRequest, request: Request) -> Any:
-        """Answer a question from the live facts only (and the selected moment), or decline; 429 when over the limit."""
+    @app.post("/chat")
+    def chat_turn(body: ChatRequest, request: Request) -> Any:
+        """Answer the last message from the match tools only (up to the live clock); 429 when over the rate limit."""
+        if body.messages[-1].role != "user":
+            raise HTTPException(422, "the last message must be the viewer's question")
         # shortcut: X-Forwarded-For can be spoofed to dodge the per-client limit; the global limit still caps the
         # model calls. Behind Azure Container Apps, trust only the ingress's own hop once it is deployed.
         client = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
@@ -110,11 +120,8 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         if not app.state.limiter.allow(client):
             return JSONResponse({"detail": "Lots of questions right now. Give it a minute and ask again."}, 429)
         orchestrator = app.state.orchestrator
-        moment = orchestrator.released_moment(body.overlay_id) if body.overlay_id else None
-        if body.overlay_id and moment is None:
-            raise HTTPException(404, f"no released overlay {body.overlay_id!r}")
-        facts = ask_facts(orchestrator.snapshot(), moment)
-        return app.state.asker.answer(body.question, body.persona, facts, body.lang, orchestrator.translator)
+        history = [m.model_dump() for m in body.messages[-HISTORY:]]
+        return app.state.chat.reply(history, body.persona, orchestrator.match_data())
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -129,13 +136,13 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
 
     @app.websocket("/ws")
     async def overlays(websocket: WebSocket, persona: str = "casual", club: str | None = None,
-                       player: str | None = None, lang: str = "en") -> None:
+                       player: str | None = None) -> None:
         """Send this viewer's overlays already released, then each new one as it is released."""
-        if persona not in PERSONAS or lang not in LANGS:
+        if persona not in PERSONAS:
             await websocket.close(code=1008)
             return
         await websocket.accept()
-        profile = {"persona": persona, "favourite_club": club, "favourite_player": player, "lang": lang}
+        profile = {"persona": persona, "favourite_club": club, "favourite_player": player}
         orchestrator, inbox = app.state.orchestrator, asyncio.Queue()
         def listener(moment: dict[str, Any], versions: dict[str, Any]) -> None:
             inbox.put_nowait((moment, versions))

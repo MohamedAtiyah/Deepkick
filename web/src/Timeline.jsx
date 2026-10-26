@@ -12,9 +12,7 @@ function useTimeline(profile, overlayCount) {
   const [data, setData] = useState(null);
   useEffect(() => {
     let alive = true;
-    const params = new URLSearchParams({ persona: profile.persona, lang: profile.lang });
-    if (profile.club) params.set("club", profile.club);
-    if (profile.player) params.set("player", profile.player);
+    const params = new URLSearchParams({ persona: profile.persona });
     const load = () =>
       fetch(`/timeline?${params}`)
         .then((r) => (r.ok ? r.json() : null))
@@ -26,7 +24,7 @@ function useTimeline(profile, overlayCount) {
       alive = false;
       clearInterval(id);
     };
-  }, [profile.persona, profile.lang, profile.club, profile.player, overlayCount]);
+  }, [profile.persona, overlayCount]);
   return data;
 }
 
@@ -77,9 +75,8 @@ export default function Timeline({ state, profile, overlays, selected, onSelect 
                   onClick={() => onSelect(selected?.key === m.key ? null : m)} />
         ))}
         {hover && (
-          <div className="tip" role="presentation" style={{ left: x(clockMs(hover.match_clock) / 60000) }}
-               lang={profile.lang} dir={profile.lang === "ar" ? "rtl" : "ltr"}>
-            <strong dir="ltr">{hover.match_clock}</strong> {hover.headline}
+          <div className="tip" role="presentation" style={{ left: x(clockMs(hover.match_clock) / 60000) }}>
+            <strong>{hover.match_clock}</strong> {hover.headline}
           </div>
         )}
       </div>

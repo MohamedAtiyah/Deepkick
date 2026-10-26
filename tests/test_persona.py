@@ -50,7 +50,7 @@ def _good_reply(moment):
 
 
 def _profile(persona="analyst", club=None, player=None):
-    return {"persona": persona, "favourite_club": club, "favourite_player": player, "lang": "en"}
+    return {"persona": persona, "favourite_club": club, "favourite_player": player}
 
 
 def test_three_personas_come_from_one_cached_call(goal):

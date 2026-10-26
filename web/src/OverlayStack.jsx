@@ -1,9 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { clockMs, dueOverlays, splitScores } from "./live.js";
-
-/** Text with every score isolated left-to-right, so "1-0" never displays as "0-1" in Arabic. */
-export const Text = ({ children }) =>
-  splitScores(children).map(([part, isScore], i) => (isScore ? <bdi key={i} dir="ltr">{part}</bdi> : part));
+import { clockMs, dueOverlays } from "./live.js";
 
 const SLOTS = 1; // one lower-third at a time: the highest priority of those due; the rest wait
 const QUEUE = 4; // shortcut: a late viewer's backlog is trimmed to the newest few rather than replayed for minutes
@@ -11,7 +7,7 @@ export const LABEL = { goal: "Goal", big_chance: "Big chance", half_time: "Half-
   momentum_swing: "Momentum", pressure_spell: "Pressure", high_press_win: "High press", speed_milestone: "Shot speed",
   sprint_milestone: "Sprint", distance_milestone: "Distance", pass_milestone: "Passing" };
 
-export default function OverlayStack({ overlays, matchClock, lang }) {
+export default function OverlayStack({ overlays, matchClock }) {
   const handled = useRef(new Set()); // moments shown or dropped: never queued again, in any persona
   const arrived = useRef(new Map()); // moment key -> match ms when it first reached the browser
   const [view, setView] = useState({ queue: [], onScreen: [] }); // queue: moment keys, oldest first
@@ -58,10 +54,10 @@ export default function OverlayStack({ overlays, matchClock, lang }) {
               <span className={`chip ${overlay.type}`}>{LABEL[overlay.type] ?? overlay.type}</span>
               <span className="minute">{overlay.match_clock}</span>
             </header>
-            <div lang={lang} dir={lang === "ar" ? "rtl" : "ltr"}>
-              <h2><Text>{overlay.payload.headline}</Text></h2>
-              <p><Text>{overlay.payload.detail}</Text></p>
-              <p className="why"><Text>{overlay.payload.why}</Text></p>
+            <div>
+              <h2>{overlay.payload.headline}</h2>
+              <p>{overlay.payload.detail}</p>
+              <p className="why">{overlay.payload.why}</p>
             </div>
           </article>
         );

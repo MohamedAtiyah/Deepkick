@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import league from "../../data/league.json";
-import { LABEL, Text } from "./OverlayStack.jsx";
+import { LABEL } from "./OverlayStack.jsx";
 
 const MINUTES = 10;
 const CLUBS = Object.fromEntries(league.clubs.map((club) => [club.id, club]));
@@ -19,13 +19,12 @@ export default function CatchUp({ profile }) {
     setData(null);
     setFailed(false);
     dialog.current.showModal();
-    const params = new URLSearchParams({ persona: profile.persona, lang: profile.lang, minutes: MINUTES });
+    const params = new URLSearchParams({ persona: profile.persona, minutes: MINUTES });
     fetch(`/catchup?${params}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
       .then(setData)
       .catch(() => setFailed(true));
   };
-  const dir = profile.lang === "ar" ? "rtl" : "ltr";
   const leader = data?.momentum && CLUBS[data.momentum.team];
 
   return (
@@ -44,11 +43,11 @@ export default function CatchUp({ profile }) {
             <dl className="summary">
               <div>
                 <dt>Score</dt>
-                <dd dir="ltr">{score(data.score.now)}</dd>
+                <dd>{score(data.score.now)}</dd>
               </div>
               <div>
                 <dt>Goals since {data.from}</dt>
-                <dd dir="ltr">
+                <dd>
                   {data.score.goals ? `${data.score.goals}, from ${score(data.score.then)}` : "None"}
                 </dd>
               </div>
@@ -65,7 +64,7 @@ export default function CatchUp({ profile }) {
                 <li key={m.moment_id}>
                   <span className="minute">{m.match_clock}</span>
                   <span className={`chip ${m.type}`}>{LABEL[m.type] ?? m.type}</span>
-                  <span lang={profile.lang} dir={dir}><Text>{m.headline}</Text></span>
+                  <span>{m.headline}</span>
                 </li>
               ))}
             </ol>

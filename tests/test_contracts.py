@@ -67,7 +67,7 @@ def _overlay():
 @pytest.mark.parametrize("mutate", [
     lambda o: None,
     lambda o: o["payload"].update(player=None),  # match-wide moments have no player
-    lambda o: o.update(persona="casual", lang="ar", priority=1),
+    lambda o: o.update(persona="casual", priority=1),
     lambda o: o.update(lang="en"),
     lambda o: o["payload"].update(source="template", evidence=[]),  # the last-resort line cites nothing
 ])
@@ -88,6 +88,7 @@ def test_valid_overlays_pass(mutate):
     (lambda o: o.update(priority=6), "priority"),
     (lambda o: o.update(priority=True), "priority"),
     (lambda o: o.update(persona="coach"), "persona"),
+    (lambda o: o.update(lang="ar"), "lang"),  # overlays are English only
     (lambda o: o.update(lang="fr"), "lang"),
     (lambda o: o.update(lang="es"), "lang"),
     (lambda o: o.update(lang="EN"), "lang"),
