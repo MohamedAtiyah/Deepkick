@@ -18,7 +18,6 @@ from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
 
 from deepkick.agents.narrative import NarrativeAgent, rate_limit_count, template_narrative
 from deepkick.agents.persona import PersonaAgent, select_overlay, template_versions
-from deepkick.agents.match_tools import MatchData
 from deepkick.agents.recap import RECAP_TYPES, RecapAgent, catch_up, select_recap
 from deepkick.agents.translate import Translator, translate_recap, translate_versions
 from deepkick.contracts import LANGS, PERSONAS
@@ -106,7 +105,6 @@ class Orchestrator:
         # Every detected moment in match order, with the score and momentum right after it (for catch-up).
         self._timeline: list[dict[str, Any]] = []
         self._recaps: list[dict[str, Any]] = []  # half-time and full-time recaps, in match order
-        self.events: list[dict[str, Any]] = []  # every event applied so far: what the chat's match tools read
         self._start, self._rate_limits_before = time.monotonic(), rate_limit_count()
         self._minute: int | None = None
         self._held: list[tuple[dict[str, Any], dict[str, Any]]] = []  # (moment, snapshot) of the open minute
@@ -150,9 +148,10 @@ class Orchestrator:
                                             if entry["minute"] <= now // 60],
                 "moments": moments}
 
-    def match_data(self) -> MatchData:
-        """The events and detected moments up to the current clock, for the chat's match tools."""
-        return MatchData(list(self.events), [entry["moment"] for entry in list(self._timeline)])
+    def released_moment(self, overlay_id: str) -> dict[str, Any] | None:
+        """The released moment behind an overlay id ("<moment_id>-<persona>-<lang>"), or None."""
+        moment_id = overlay_id.rsplit("-", 2)[0]
+        return next((moment for moment, _ in self._released if moment["moment_id"] == moment_id), None)
 
     def released_overlay(self, overlay_id: str, persona: str, lang: str) -> dict[str, Any] | None:
         """The released overlay with this id for (persona, lang), or None if no released moment has that id."""
@@ -174,7 +173,6 @@ class Orchestrator:
         self.counts["events"] += 1
         if not self.stats.update(event):
             return
-        self.events.append(event)
         minute = clock_seconds(event) // 60
         if self._minute is not None and minute != self._minute:
             self.close_minute()

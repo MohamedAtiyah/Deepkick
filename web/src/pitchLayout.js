@@ -3,10 +3,9 @@
 
 export const LENGTH = 105;
 export const WIDTH = 68;
-// The team block slides toward the ball's side and up or down the pitch, as a unit; markers stay on the pitch.
-const MAX_SHIFT = { x: 18, y: 10 }; // the most a whole outfield shape slides toward the ball
-const GK_MAX = 4; // keepers stay near their line
-const SHIFT_RATE = { x: 0.35, y: 0.3 }; // metres of shift per metre the ball is from the centre spot
+const MAX_SHIFT = { x: 6, y: 3 }; // the most a whole outfield shape slides toward the ball
+const GK_MAX = 2; // keepers stay on their line
+const SHIFT_RATE = { x: 0.2, y: 0.15 }; // metres of shift per metre the ball is from the centre spot
 const ROLE_WEIGHT = { defender: 0.5, midfielder: 0.75, forward: 1 };
 export const MIN_GAP = 3; // markers closer than this are nudged apart
 
