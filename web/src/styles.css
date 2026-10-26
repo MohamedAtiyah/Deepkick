@@ -258,8 +258,8 @@ button, select { font: inherit; color: inherit; }
 .pitch .lines .goal { fill: color-mix(in srgb, var(--pitch-line) 15%, transparent); }
 
 /* Players ease to their spots and the ball glides between event coordinates, so nothing teleports. */
-.player, .ball { position: absolute; transform: translate(-50%, -50%); }
-.player {
+.pitch .player, .pitch .ball { position: absolute; transform: translate(-50%, -50%); }
+.pitch .player {
   display: grid;
   place-items: center;
   width: max(14px, 2.6cqw);
@@ -273,8 +273,8 @@ button, select { font: inherit; color: inherit; }
   box-shadow: 0 2px 6px var(--shadow);
   transition: left 0.4s ease-out, top 0.4s ease-out;
 }
-.player.on-ball { z-index: 1; box-shadow: 0 0 0 3px var(--pitch-line); }
-.ball {
+.pitch .player.on-ball { z-index: 1; box-shadow: 0 0 0 3px var(--pitch-line); }
+.pitch .ball {
   width: max(6px, 1cqw);
   height: max(6px, 1cqw);
   border-radius: 50%;
@@ -579,6 +579,7 @@ button, select { font: inherit; color: inherit; }
 .chat-head button { border: 1px solid var(--border); border-radius: 8px; background: transparent; padding: 6px 10px;
   font-size: 12px; font-weight: 600; cursor: pointer; }
 .chat-log { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 18px; }
+.chat-log > * { flex-shrink: 0; } /* a long conversation scrolls; bubbles never squeeze and spill their cards */
 .chat-empty p { color: var(--text-muted); font-size: 14px; line-height: 1.5; }
 .starters { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 .starters button {
