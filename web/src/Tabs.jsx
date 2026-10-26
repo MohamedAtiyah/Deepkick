@@ -35,7 +35,7 @@ export default function Tabs({ state, profile }) {
       <div className="tabpanel" role="tabpanel" id={`panel-${active}`} aria-labelledby={`tab-${active}`} tabIndex={0}>
         {active === "stats" && <Stats state={state} />}
         {active === "lineups" && <Lineups state={state} />}
-        {active === "recap" && <Recap persona={profile.persona} lang={profile.lang} />}
+        {active === "recap" && <Recap persona={profile.persona} />}
       </div>
     </section>
   );

@@ -14,7 +14,7 @@ export function nextClip(queue, now, staleMs = STALE_MS) {
 
 /** While `enabled`, speak each overlay that newly reaches the feed; stop at once when disabled. */
 export function useCommentary(overlays, matchClock, enabled) {
-  const latest = useRef(overlays); // the newest text for a moment, so a persona or language switch is respected
+  const latest = useRef(overlays); // the newest text for a moment, so a persona switch is respected
   latest.current = overlays;
   const heard = useRef(new Set()); // moments already queued or present when commentary was switched on
   const queue = useRef([]);
@@ -30,7 +30,7 @@ export function useCommentary(overlays, matchClock, enabled) {
     const overlay = clip && latest.current.get(clip.key);
     if (!overlay) return;
     const id = run.current;
-    const params = new URLSearchParams({ persona: overlay.persona, lang: overlay.lang });
+    const params = new URLSearchParams({ persona: overlay.persona });
     const sound = new Audio(`/speech/${encodeURIComponent(overlay.overlay_id)}?${params}`);
     const done = () => {
       if (id !== run.current) return;

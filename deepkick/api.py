@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field, StringConstraints
 from deepkick.agents.chat import ChatAgent
 from deepkick.agents.persona import select_overlay
 from deepkick.agents.speech import Speech, spoken_text
-from deepkick.contracts import LANGS, PERSONAS
+from deepkick.contracts import PERSONAS
 from deepkick.orchestrator import Orchestrator, live_events, replay_events
 from deepkick.ratelimit import RateLimiter
 
@@ -39,11 +39,10 @@ class ChatMessage(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    """A chat turn: the conversation so far (the last message is the viewer's question), persona and language."""
+    """A chat turn: the conversation so far (the last message is the viewer's question) and the persona."""
 
     messages: Annotated[list[ChatMessage], Field(min_length=1)]
     persona: Literal["analyst", "casual", "player"] = "casual"
-    lang: Literal["en", "ar"] = "en"
 
 
 def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[dict[str, Any]] | None = None,
@@ -78,35 +77,33 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
         return app.state.orchestrator.snapshot()
 
     @app.get("/timeline")
-    def timeline(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
-                 club: str | None = None, player: str | None = None) -> dict[str, Any]:
+    def timeline(persona: Literal["analyst", "casual", "player"] = "casual", club: str | None = None,
+                 player: str | None = None) -> dict[str, Any]:
         """Per-minute momentum (home minus away) and the released moments, up to the current clock only."""
-        return app.state.orchestrator.timeline({"persona": persona, "lang": lang, "favourite_club": club,
+        return app.state.orchestrator.timeline({"persona": persona, "favourite_club": club,
                                                 "favourite_player": player})
 
     @app.get("/recap")
-    def recap(persona: Literal["analyst", "casual", "player"] | None = None,
-              lang: Literal["en", "ar"] = "en") -> list[dict[str, Any]]:
-        """The half-time and full-time recaps written so far, newest first, for one persona and language."""
+    def recap(persona: Literal["analyst", "casual", "player"] | None = None) -> list[dict[str, Any]]:
+        """The half-time and full-time recaps written so far, newest first, for one persona."""
         orchestrator = app.state.orchestrator
-        return orchestrator.recaps(persona or orchestrator.profile["persona"], lang)
+        return orchestrator.recaps(persona or orchestrator.profile["persona"])
 
     @app.get("/catchup")
-    def catchup(persona: Literal["analyst", "casual", "player"] = "casual", lang: Literal["en", "ar"] = "en",
+    def catchup(persona: Literal["analyst", "casual", "player"] = "casual",
                 minutes: int = Query(10, ge=1, le=120)) -> dict[str, Any]:
         """The score change, moment headlines and momentum of the last `minutes` of match clock, up to now only."""
-        return app.state.orchestrator.catch_up(persona, lang, minutes)
+        return app.state.orchestrator.catch_up(persona, minutes)
 
     @app.get("/speech/{overlay_id}", responses={200: {"content": {"audio/mpeg": {}}}})
-    def speech_clip(overlay_id: str, persona: Literal["analyst", "casual", "player"],
-                    lang: Literal["en", "ar"]) -> Response:
+    def speech_clip(overlay_id: str, persona: Literal["analyst", "casual", "player"]) -> Response:
         """The overlay's headline and detail spoken as MP3: 404 for an unknown overlay, 503 if synthesis failed."""
-        overlay = app.state.orchestrator.released_overlay(overlay_id, persona, lang)
+        overlay = app.state.orchestrator.released_overlay(overlay_id, persona)
         if overlay is None:
             raise HTTPException(404, f"no released overlay {overlay_id!r}")
         voice = app.state.speech
-        audio = voice and voice.synthesize(spoken_text(overlay["payload"]), persona, lang, overlay_id=overlay_id,
-                                           event_id=overlay_id.rsplit("-", 3)[0])  # id: <event>-<type>-<persona>-<lang>
+        audio = voice and voice.synthesize(spoken_text(overlay["payload"]), persona, overlay_id=overlay_id,
+                                           event_id=overlay_id.rsplit("-", 3)[0])  # id: <event>-<type>-<persona>-en
         if audio is None:
             raise HTTPException(503, "commentary is unavailable for this overlay")  # the text overlay still ships
         return Response(audio, media_type="audio/mpeg")
@@ -124,8 +121,7 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
             return JSONResponse({"detail": "Lots of questions right now. Give it a minute and ask again."}, 429)
         orchestrator = app.state.orchestrator
         history = [m.model_dump() for m in body.messages[-HISTORY:]]
-        return app.state.chat.reply(history, body.persona, body.lang, orchestrator.match_data(),
-                                    orchestrator.translator)
+        return app.state.chat.reply(history, body.persona, orchestrator.match_data())
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -140,13 +136,13 @@ def create_app(orchestrator: Orchestrator | None = None, events: AsyncIterator[d
 
     @app.websocket("/ws")
     async def overlays(websocket: WebSocket, persona: str = "casual", club: str | None = None,
-                       player: str | None = None, lang: str = "en") -> None:
+                       player: str | None = None) -> None:
         """Send this viewer's overlays already released, then each new one as it is released."""
-        if persona not in PERSONAS or lang not in LANGS:
+        if persona not in PERSONAS:
             await websocket.close(code=1008)
             return
         await websocket.accept()
-        profile = {"persona": persona, "favourite_club": club, "favourite_player": player, "lang": lang}
+        profile = {"persona": persona, "favourite_club": club, "favourite_player": player}
         orchestrator, inbox = app.state.orchestrator, asyncio.Queue()
         def listener(moment: dict[str, Any], versions: dict[str, Any]) -> None:
             inbox.put_nowait((moment, versions))

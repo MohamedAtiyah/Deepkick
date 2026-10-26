@@ -14,7 +14,6 @@ from deepkick.agents import narrative
 from deepkick.agents.match_tools import CLUBS, MatchData, run_tool
 from deepkick.agents.narrative import (_NUMBER, RATE_LIMIT_BACKOFF_S, REASONING_EFFORT, RETRY_AFTER_MAX_S, TIMEOUT_S,
                                        _retry_after, client_from_env)
-from deepkick.agents.translate import Translator, same_numbers, translate_batch
 
 log = logging.getLogger("deepkick.chat")
 
@@ -174,8 +173,7 @@ class ChatAgent:
             client, deployment = client_from_env("chat") or (None, None)
         self.client, self.deployment = client, deployment
 
-    def reply(self, messages: list[dict[str, str]], persona: str, lang: str, data: MatchData,
-              translator: Translator | None = None) -> dict[str, Any]:
+    def reply(self, messages: list[dict[str, str]], persona: str, data: MatchData) -> dict[str, Any]:
         """Return {answer, cards, tools_used, data_until_clock, source} for the last user message."""
         start = time.monotonic()
         deadline, results, answer, failure = start + TOTAL_S, [], None, None
@@ -206,8 +204,7 @@ class ChatAgent:
                "source": "model" if answer else "declined"}
         if failure:
             log.warning("stage=chat declined: %s", failure)
-        out = translate_reply(out, translator, lang) if lang != "en" else out | {"lang": "en"}
-        log.info("stage=chat persona=%s lang=%s duration_ms=%.0f tools_used=%s fallback=%s", persona, lang,
+        log.info("stage=chat persona=%s duration_ms=%.0f tools_used=%s fallback=%s", persona,
                  (time.monotonic() - start) * 1000, ",".join(out["tools_used"]) or "none", "yes" if failure else "no")
         return out
 
@@ -255,14 +252,3 @@ class ChatAgent:
                 log.warning("stage=chat rate_limited=429 retry_in_s=%.1f", wait)
                 narrative._sleep(wait)
 
-
-def translate_reply(out: dict[str, Any], translator: Translator | None, lang: str) -> dict[str, Any]:
-    """The answer, card titles and row labels in `lang` in one batch, with `lang` set to the reply's language; the
-    English stays (and `lang` is "en") if a name or number would be lost or changed."""
-    texts = [out["answer"]] + [c["title"] for c in out["cards"]] + [r["label"] for c in out["cards"] for r in c["rows"]]
-    translated = translate_batch(texts, translator, lang, None)
-    if translated is None or not all(same_numbers(t, translated[t]) for t in texts):
-        return out | {"lang": "en"}
-    return out | {"lang": lang, "answer": translated[out["answer"]], "cards": [
-        c | {"title": translated[c["title"]], "rows": [r | {"label": translated[r["label"]]} for r in c["rows"]]}
-        for c in out["cards"]]}

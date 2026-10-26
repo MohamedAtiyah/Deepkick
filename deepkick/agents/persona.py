@@ -283,7 +283,7 @@ def casual_template(moment: dict[str, Any]) -> dict[str, str]:
             why = f"{CLUB_NAMES[leader]} win the match." if leader else "It ends all square."
         whistle = "Half-time" if kind == "half_time" else "Full-time"
         return {"headline": f"{whistle}: {_short(home)} {h}-{a} {_short(away)}",
-                # Two plain clauses rather than "13 shots to Calderbrook's 17", which the Translator garbles.
+                # Two plain clauses rather than "13 shots to Calderbrook's 17", which reads awkwardly.
                 "detail": f"{_short(home)} had {_count(ht, 'shot')} and {_short(away)} had {_count(at, 'shot')}.",
                 "why": why}
     if kind == "big_chance":
@@ -456,25 +456,22 @@ def select_overlay(moment: dict[str, Any], versions: dict[str, Any], profile: di
         priority = min(5, priority + 1)
     elif club and moment["team"] and moment["type"] != "goal" and priority <= LOW_PRIORITY:
         priority = 1  # a small moment for the other club; goals always keep their priority
-    persona, lang = profile.get("persona"), profile.get("lang", "en")
-    english = version = versions.get(persona) or {}
-    if lang != "en":  # the translated version, if the Translator step made one; else the English text ships
-        translated = versions.get("translations", {}).get(lang, {}).get(persona)
-        version = translated if translated and not translated["fallback"] else english
+    persona = profile.get("persona")
+    version = versions.get(persona) or {}
     overlay = {
-        "overlay_id": f"{moment['moment_id']}-{persona}-{lang}",
+        "overlay_id": f"{moment['moment_id']}-{persona}-en",
         "type": moment["type"],
         "match_clock": moment["match_clock"],
         "show_at_ms": clock_seconds(moment) * 1000,
         "duration_ms": 8000 if moment["type"] == "goal" else 6000,
         "priority": priority,
         "persona": persona,
-        "lang": lang if version is not english else "en",  # the language the text is actually in
+        "lang": "en",
         "payload": {"player": moment["player"]["name"] if moment["player"] else None,
                     **{k: version.get(k) for k in VERSION_KEYS},
                     "evidence": [{"label": e["label"], "value": e["value"]}
-                                 for e in version.get("evidence", english.get("evidence", []))],
-                    "source": "template" if english.get("fallback", True) else "model"},
+                                 for e in version.get("evidence", [])],
+                    "source": "template" if version.get("fallback", True) else "model"},
     }
     validate_overlay(overlay)
     return overlay
@@ -560,7 +557,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     load_dotenv()
 
-    profile = {"persona": args.persona, "favourite_club": args.club, "favourite_player": args.player, "lang": "en"}
+    profile = {"persona": args.persona, "favourite_club": args.club, "favourite_player": args.player}
     stats, detector, narrator, personas, done = StatsAgent(), MomentDetector(), NarrativeAgent(), PersonaAgent(), 0
     with args.replay.open() as f:
         for line in f:

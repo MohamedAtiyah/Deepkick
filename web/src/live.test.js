@@ -1,17 +1,7 @@
 // Run with `npm test`.
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dueOverlays, splitLtr } from "./live.js";
-
-test("English names, scores, decimals and clocks are split out to render left-to-right; punctuation stays Arabic", () => {
-  assert.deepEqual(splitLtr("Calderbrook متقدما 1-0"), [["Calderbrook", true], [" متقدما ", false], ["1-0", true]]);
-  assert.deepEqual(splitLtr("سجل Rafe Ironsby في 13:52، بعد 9.2 م."),
-    [["سجل ", false], ["Rafe Ironsby", true], [" في ", false], ["13:52", true], ["، بعد ", false], ["9.2", true],
-     [" م.", false]]);
-  assert.deepEqual(splitLtr("هدف Caius Mossington."), [["هدف ", false], ["Caius Mossington", true], [".", false]]);
-  assert.deepEqual(splitLtr("ASH 2 - 3 CAL و 1,234"), [["ASH 2 - 3 CAL", true], [" و ", false], ["1,234", true]]);
-  assert.deepEqual(splitLtr("لا أرقام"), [["لا أرقام", false]]);
-});
+import { dueOverlays } from "./live.js";
 
 test("the lower-third skips overlays over a match minute behind the clock, except goals, and shows the top priority", () => {
   const overlays = new Map(Object.entries({

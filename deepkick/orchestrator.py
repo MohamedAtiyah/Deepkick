@@ -20,8 +20,7 @@ from deepkick.agents.narrative import NarrativeAgent, rate_limit_count, template
 from deepkick.agents.persona import PersonaAgent, select_overlay, template_versions
 from deepkick.agents.match_tools import MatchData
 from deepkick.agents.recap import RECAP_TYPES, RecapAgent, catch_up, select_recap
-from deepkick.agents.translate import Translator, translate_recap, translate_versions
-from deepkick.contracts import LANGS, PERSONAS
+from deepkick.contracts import PERSONAS
 from deepkick.moments import MomentDetector
 from deepkick.simulator import clock_seconds
 from deepkick.stats import StatsAgent
@@ -64,11 +63,11 @@ class ExplainExecutor(Executor):
 
 
 class PersonaliseExecutor(Executor):
-    """Workflow step 5: the Persona Agent writes the three persona versions, then the Translator their Arabic."""
+    """Workflow step 5: the Persona Agent writes the three persona versions."""
 
-    def __init__(self, personas: PersonaAgent, translator: Translator | None) -> None:
+    def __init__(self, personas: PersonaAgent) -> None:
         super().__init__("personalise")
-        self.personas, self.translator = personas, translator
+        self.personas = personas
 
     @handler
     async def personalise(self, job: dict, ctx: WorkflowContext[Any, dict]) -> None:
@@ -77,11 +76,6 @@ class PersonaliseExecutor(Executor):
             versions = template_versions(job["moment"])
         else:
             versions = await asyncio.to_thread(self.personas.versions, job["moment"], job["narrative"])
-        if self.translator:  # translated once per moment here, so no viewer ever waits on a Translator call
-            versions = versions | {"translations": {
-                lang: await asyncio.to_thread(translate_versions, versions, self.translator, lang,
-                                              job["moment"]["event_id"])
-                for lang in LANGS if lang != "en"}}
         await ctx.yield_output(job | {"versions": versions})
 
 
@@ -91,12 +85,11 @@ class Orchestrator:
     def __init__(self, narrator: NarrativeAgent | None = None, personas: PersonaAgent | None = None,
                  profile: dict[str, Any] | None = None, workers: int = WORKERS, cap: int = CAP_PER_MINUTE,
                  emit: Callable[[dict[str, Any]], None] = lambda overlay: None,
-                 translator: Translator | None = None, recapper: RecapAgent | None = None) -> None:
+                 recapper: RecapAgent | None = None) -> None:
         self.stats, self.detector = StatsAgent(), MomentDetector()
         self.narrator, self.personas = narrator or NarrativeAgent(), personas or PersonaAgent()
         self.recapper = recapper or RecapAgent()
-        self.translator = translator or Translator.from_env()
-        self.profile = profile or {"persona": "analyst", "favourite_club": None, "favourite_player": None, "lang": "en"}
+        self.profile = profile or {"persona": "analyst", "favourite_club": None, "favourite_player": None}
         self.workers, self.cap, self.emit = workers, cap, emit
         self.counts: Counter[str] = Counter()
         self.status = "not_started"  # then running, finished or failed
@@ -122,13 +115,13 @@ class Orchestrator:
         """Every overlay released so far for a viewer profile (default: the run's), in match-clock order."""
         return [select_overlay(m, v, profile or self.profile) for m, v in self._released]
 
-    def recaps(self, persona: str, lang: str) -> list[dict[str, Any]]:
-        """The half-time and full-time recaps written so far for (persona, lang), newest first."""
-        return [select_recap(record, persona, lang) for record in self._recaps[::-1]]
+    def recaps(self, persona: str) -> list[dict[str, Any]]:
+        """The half-time and full-time recaps written so far for a persona, newest first."""
+        return [select_recap(record, persona) for record in self._recaps[::-1]]
 
-    def catch_up(self, persona: str, lang: str, minutes: int, at: str | None = None) -> dict[str, Any]:
+    def catch_up(self, persona: str, minutes: int, at: str | None = None) -> dict[str, Any]:
         """The last `minutes` of match clock up to `at` (default: now), with headlines in the viewer's words."""
-        profile = self.profile | {"persona": persona, "lang": lang}
+        profile = self.profile | {"persona": persona}
         headlines = {m["moment_id"]: select_overlay(m, v, profile)["payload"]["headline"] for m, v in self._released}
         return catch_up(self._timeline, headlines, at or self.stats.snapshot()["match_clock"], minutes)
 
@@ -154,11 +147,11 @@ class Orchestrator:
         """The events and detected moments up to the current clock, for the chat's match tools."""
         return MatchData(list(self.events), [entry["moment"] for entry in list(self._timeline)])
 
-    def released_overlay(self, overlay_id: str, persona: str, lang: str) -> dict[str, Any] | None:
-        """The released overlay with this id for (persona, lang), or None if no released moment has that id."""
+    def released_overlay(self, overlay_id: str, persona: str) -> dict[str, Any] | None:
+        """The released overlay with this id for a persona, or None if no released moment has that id."""
         for moment, versions in self._released:
-            if f"{moment['moment_id']}-{persona}-{lang}" == overlay_id:
-                return select_overlay(moment, versions, self.profile | {"persona": persona, "lang": lang})
+            if f"{moment['moment_id']}-{persona}-en" == overlay_id:
+                return select_overlay(moment, versions, self.profile | {"persona": persona})
         return None
 
     def summary(self) -> dict[str, Any]:
@@ -211,7 +204,7 @@ class Orchestrator:
             model = moment["priority"] >= MODEL_MIN_PRIORITY and self.narrator.client is not None
             try:
                 explain = ExplainExecutor(self.narrator)
-                personalise = PersonaliseExecutor(self.personas, self.translator)
+                personalise = PersonaliseExecutor(self.personas)
                 workflow = WorkflowBuilder(start_executor=explain).add_edge(explain, personalise).build()
                 job = (await workflow.run({"moment": moment, "snapshot": snapshot, "model": model})).get_outputs()[0]
                 fallback = model and (job["narrative"]["fallback"]
@@ -232,14 +225,10 @@ class Orchestrator:
             self._queue.task_done()
 
     async def _recap(self, moment: dict[str, Any], snapshot: dict[str, Any]) -> None:
-        """Write, translate and store the recaps for a half_time or full_time moment."""
+        """Write and store the recaps for a half_time or full_time moment."""
         moments = [entry["moment"] for entry in self._timeline]
         versions = await asyncio.to_thread(self.recapper.write, moment, snapshot, moments)
-        translations = {lang: await asyncio.to_thread(translate_recap, versions, self.translator, lang,
-                                                      moment["event_id"])
-                        for lang in LANGS if lang != "en"} if self.translator else {}
-        self._recaps.append({"moment": moment, "score": dict(snapshot["score"]), "versions": versions,
-                             "translations": translations})
+        self._recaps.append({"moment": moment, "score": dict(snapshot["score"]), "versions": versions})
         self._recaps.sort(key=lambda record: clock_seconds(record["moment"]))
 
     def _release(self) -> None:
@@ -332,7 +321,7 @@ def main(argv: list[str] | None = None) -> None:
     logging.getLogger("deepkick.orchestrator").setLevel(logging.INFO)
     load_dotenv()
 
-    profile = {"persona": args.persona, "favourite_club": None, "favourite_player": None, "lang": "en"}
+    profile = {"persona": args.persona, "favourite_club": None, "favourite_player": None}
     orchestrator = Orchestrator(profile=profile, workers=args.workers,
                                 emit=lambda overlay: print(json.dumps(overlay), flush=True))
     events = live_events() if args.live else replay_events(args.replay, args.speed)

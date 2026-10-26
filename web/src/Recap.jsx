@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
-import { Text, Untranslated, dirOf } from "./OverlayStack.jsx";
 
-/** The half-time and full-time recaps for the current persona and language, refreshed every 5 seconds. */
-export default function Recap({ persona, lang }) {
+/** The half-time and full-time recaps for the current persona, refreshed every 5 seconds. */
+export default function Recap({ persona }) {
   const [items, setItems] = useState([]);
   useEffect(() => {
     let alive = true;
     const load = () =>
-      fetch(`/recap?persona=${persona}&lang=${lang}`)
+      fetch(`/recap?persona=${persona}`)
         .then((r) => (r.ok ? r.json() : []))
         .then((list) => alive && setItems(list))
         .catch(() => {});
@@ -17,7 +16,7 @@ export default function Recap({ persona, lang }) {
       alive = false;
       clearInterval(id);
     };
-  }, [persona, lang]);
+  }, [persona]);
 
   return (
     <section className="recap">
@@ -28,8 +27,7 @@ export default function Recap({ persona, lang }) {
             <span className="chip">{r.type === "half_time" ? "Half-time" : "Full-time"}</span>
             <span className="minute">{r.match_clock}</span>
           </header>
-          <p lang={r.lang} dir={dirOf(r.lang)}><Text>{r.text}</Text></p>
-          <Untranslated wanted={lang} got={r.lang} />
+          <p>{r.text}</p>
         </article>
       ))}
     </section>

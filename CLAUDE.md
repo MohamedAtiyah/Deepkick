@@ -11,7 +11,7 @@ Deepkick turns a stream of synthetic football events into explained, timed, pers
 2. **Interpret**: Stats Agent keeps running stats; moment detector flags key moments. Pure Python, no model calls.
 3. **Explain**: Narrative Agent (Microsoft Foundry model) says why a flagged moment matters.
 4. **Render**: overlay objects streamed over a FastAPI WebSocket, drawn by the React broadcast view.
-5. **Personalise**: Persona Agent rewrites for Analyst, Casual fan or Player focus, filtered by favourite club and player; Azure AI Translator for language.
+5. **Personalise**: Persona Agent rewrites for Analyst, Casual fan or Player focus, filtered by favourite club and player. English only.
 
 Microsoft Agent Framework orchestrates stages 2–5 over one shared match state.
 
@@ -21,7 +21,6 @@ Microsoft Agent Framework orchestrates stages 2–5 over one shared match state.
 - Azure Event Hubs (Basic tier: one consumer group, so one orchestrator reads the stream and fans out)
 - Microsoft Foundry: gpt-5-mini, Global Standard deployment at 50,000 tokens per minute; tracing and evaluation
 - Microsoft Agent Framework
-- Azure AI Translator: English and Arabic (overlay text into Arabic; English passes through)
 - React + Vite frontend
 - Deploy: Azure Container Apps (backend), Azure Static Web Apps (frontend)
 
@@ -68,13 +67,13 @@ Overlay (one JSON object per WebSocket message):
 `overlay_id, type, match_clock, show_at_ms, duration_ms, priority, persona, lang, payload{player, headline, detail, why, evidence[{label, value}], source}`
 
 `source` is `model` or `template`; `evidence` is the numeric moment facts the text cites, values copied from the facts.
-`lang` is the language the text is actually in: `en` when an Arabic translation was not usable (`overlay_id` keeps the language asked for). Player and club names stay in English in every language.
+`lang` is always `en`: overlays are English only.
 
 Change a contract only together with its producer, its consumers and its tests.
 
 ## Plan
 
 - Day 1 (Tue 20 Oct): league data, simulator, Event Hubs, Stats Agent, moment detector, tests.
-- Day 2 (Wed 21 Oct): Foundry project, narrative, persona, recap agents, translation, orchestration with fallbacks, overlay API, tracing.
+- Day 2 (Wed 21 Oct): Foundry project, narrative, persona, recap agents, orchestration with fallbacks, overlay API, tracing.
 - Day 3 (Thu 22 Oct): React broadcast view, personalisation panel, Azure deploy, README, demo video, submit.
-- Fri 23 – Mon 26 Oct: buffer. If behind, cut Arabic, then half-time recap, then the Foundry eval. Never cut the persona switch or the timed overlays.
+- Fri 23 – Mon 26 Oct: buffer. If behind, cut the half-time recap, then the Foundry eval. Never cut the persona switch or the timed overlays.

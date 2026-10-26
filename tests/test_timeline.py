@@ -60,7 +60,7 @@ def _settled(client, **params):
 def test_timeline_has_no_entries_past_the_clock():
     gate = threading.Event()  # the stream holds before the first event at 45:00 until the test opens it
     with TestClient(create_app(_orchestrator(), _paused_at_half_time(gate))) as client:
-        timeline = _settled(client, persona="analyst", lang="en")
+        timeline = _settled(client, persona="analyst")
         now = clock_seconds({"match_clock": timeline["clock"]})
         assert 44 * 60 <= now < 45 * 60
         assert [m["minute"] for m in timeline["minutes"]] == list(range(1, now // 60 + 1))  # completed minutes only

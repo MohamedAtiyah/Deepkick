@@ -14,29 +14,24 @@ import httpx
 
 from deepkick.agents import narrative
 from deepkick.agents.narrative import RATE_LIMIT_BACKOFF_S, RETRY_AFTER_MAX_S, _retry_after
-from deepkick.contracts import LANGS, PERSONAS
+from deepkick.contracts import PERSONAS
 
 log = logging.getLogger("deepkick.speech")
 
 TIMEOUT_S = 10.0  # per attempt
 ATTEMPTS = 2
 OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3"
-# One neural voice per (persona, lang): en-GB for English, Gulf Arabic for Arabic.
+# One en-GB neural voice per persona.
 # Confirm against the region with `python -m deepkick.agents.speech --check-voices`.
-VOICES = {
-    ("analyst", "en"): "en-GB-RyanNeural", ("casual", "en"): "en-GB-SoniaNeural",
-    ("player", "en"): "en-GB-ThomasNeural",
-    ("analyst", "ar"): "ar-SA-HamedNeural", ("casual", "ar"): "ar-SA-ZariyahNeural",
-    ("player", "ar"): "ar-AE-HamdanNeural",
-}
+VOICES = {"analyst": "en-GB-RyanNeural", "casual": "en-GB-SoniaNeural", "player": "en-GB-ThomasNeural"}
 # Persona style through SSML prosody only; the player voice speaks at its default.
 PROSODY = {"analyst": {"rate": "-5%"}, "casual": {"rate": "+10%", "pitch": "+5%"}, "player": {}}
 _XML = {"'": "&apos;", '"': "&quot;"}  # escape() already handles &, < and >
 
 
-def ssml(text: str, persona: str, lang: str) -> str:
+def ssml(text: str, persona: str) -> str:
     """The SSML for `text` in the persona's voice and prosody, with every character of the text XML-escaped."""
-    voice = VOICES[(persona, lang)]
+    voice = VOICES[persona]
     locale = "-".join(voice.split("-")[:2])  # "en-GB" from "en-GB-RyanNeural"
     body = escape(text, _XML)
     if PROSODY[persona]:
@@ -47,14 +42,14 @@ def ssml(text: str, persona: str, lang: str) -> str:
 
 
 def spoken_text(payload: dict[str, Any]) -> str:
-    """What the commentary says: the overlay's headline, then its detail (already translated for Arabic)."""
+    """What the commentary says: the overlay's headline, then its detail."""
     headline = payload["headline"].strip()
-    end = "" if headline[-1:] in (".", "!", "?", "؟", "…") else "."
+    end = "" if headline[-1:] in (".", "!", "?", "…") else "."
     return f"{headline}{end} {payload['detail'].strip()}"
 
 
 class Speech:
-    """Azure AI Speech text-to-speech client with an (overlay_id, persona, lang) cache of the MP3 clips."""
+    """Azure AI Speech text-to-speech client with an (overlay_id, persona) cache of the MP3 clips."""
 
     def __init__(self, key: str, region: str, client: httpx.Client | None = None,
                  timeout_s: float = TIMEOUT_S) -> None:
@@ -76,14 +71,14 @@ class Speech:
             return None
         return cls(key, region)
 
-    def synthesize(self, text: str, persona: str, lang: str, *, overlay_id: str | None = None,
+    def synthesize(self, text: str, persona: str, *, overlay_id: str | None = None,
                    event_id: str | None = None) -> bytes | None:
-        """The MP3 for `text` in the (persona, lang) voice, or None after ATTEMPTS failures; never raises.
+        """The MP3 for `text` in the persona's voice, or None after ATTEMPTS failures; never raises.
 
-        Clips are cached by (overlay_id, persona, lang) when an overlay_id is given. A 429 waits out
+        Clips are cached by (overlay_id, persona) when an overlay_id is given. A 429 waits out
         RATE_LIMIT_BACKOFF_S (or Retry-After) without using up an attempt, as for model calls.
         """
-        key = (overlay_id, persona, lang) if overlay_id else None
+        key = (overlay_id, persona) if overlay_id else None
         if key in self.cache:
             return self.cache[key]
         start, audio = time.monotonic(), None
@@ -91,7 +86,7 @@ class Speech:
         while attempt <= ATTEMPTS:
             try:
                 response = self.client.post(self.url, headers=self.headers, timeout=self.timeout_s,
-                                            content=ssml(text, persona, lang).encode("utf-8"))
+                                            content=ssml(text, persona).encode("utf-8"))
                 response.raise_for_status()
                 if not response.content:
                     raise ValueError("empty audio")
@@ -110,7 +105,7 @@ class Speech:
             attempt += 1
         if audio is not None and key:
             self.cache[key] = audio
-        log.info("stage=speech event_id=%s persona=%s lang=%s duration_ms=%.0f fallback=%s", event_id, persona, lang,
+        log.info("stage=speech event_id=%s persona=%s duration_ms=%.0f fallback=%s", event_id, persona,
                  (time.monotonic() - start) * 1000, "no" if audio is not None else "yes")
         return audio
 
@@ -130,7 +125,6 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--check-voices", action="store_true", help="confirm VOICES against the region's voices/list")
     parser.add_argument("--say", help="text to speak")
     parser.add_argument("--persona", choices=PERSONAS, default="casual")
-    parser.add_argument("--lang", choices=LANGS, default="en")
     parser.add_argument("--out", default="commentary.mp3")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -145,7 +139,7 @@ def main(argv: list[str] | None = None) -> None:
         print("all voices found" if not missing else f"missing voices: {', '.join(missing)}")
         sys.exit(1 if missing else 0)
     if args.say:
-        audio = speech.synthesize(args.say, args.persona, args.lang)
+        audio = speech.synthesize(args.say, args.persona)
         if audio is None:
             sys.exit("synthesis failed; see the log")
         with open(args.out, "wb") as f:

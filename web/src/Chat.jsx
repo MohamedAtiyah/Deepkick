@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import league from "../../data/league.json";
-import { Text, Untranslated, dirOf } from "./OverlayStack.jsx";
 
 const MAX_CHARS = 300; // the server's limit per message
 const HISTORY = 6; // messages the server keeps
@@ -22,14 +21,14 @@ const PROBLEM = {
   other: "The match chat couldn't answer just now. Try again in a moment.",
 };
 
-const value = (v, unit) => <><bdi dir="ltr">{v}</bdi>{unit && <small> {unit}</small>}</>;
+const value = (v, unit) => <>{v}{unit && <small> {unit}</small>}</>;
 
 /** A stat card built by the server from tool results: stat block, ranked bars, comparison or moment list. */
-function Card({ card, dir }) {
+function Card({ card }) {
   if (card.kind === "ranking") {
     const top = Math.max(...card.rows.map((r) => Number(r.value) || 0), 1);
     return (
-      <figure className="stat-card ranking" dir={dir}>
+      <figure className="stat-card ranking">
         <figcaption>{card.title}</figcaption>
         <ol>
           {card.rows.map((r) => (
@@ -45,7 +44,7 @@ function Card({ card, dir }) {
   }
   if (card.kind === "comparison") {
     return (
-      <figure className="stat-card comparison" dir={dir}>
+      <figure className="stat-card comparison">
         <figcaption>{card.title}</figcaption>
         <table>
           <thead><tr><th scope="col"><span className="sr-only">Stat</span></th>
@@ -61,7 +60,7 @@ function Card({ card, dir }) {
     );
   }
   return (
-    <figure className={`stat-card ${card.kind}`} dir={dir}>
+    <figure className={`stat-card ${card.kind}`}>
       <figcaption>{card.title}</figcaption>
       <dl>
         {card.rows.map((r, i) => (
@@ -74,7 +73,7 @@ function Card({ card, dir }) {
 
 /** "Ask the match": a chat answered from spoiler-safe match tools, with the facts it used as cards. */
 export default function Chat({ profile, clock, docked, open, onClose }) {
-  const [messages, setMessages] = useState([]); // {role, content, lang?, cards?, tools?, source?, problem?}
+  const [messages, setMessages] = useState([]); // {role, content, cards?, tools?, source?, problem?}
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const input = useRef(null);
@@ -103,14 +102,14 @@ export default function Chat({ profile, clock, docked, open, onClose }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          persona: profile.persona, lang: profile.lang,
+          persona: profile.persona,
           // The server keeps 6 messages of at most 300 characters; longer answers are trimmed for context.
           messages: conversation.slice(-HISTORY).map((m) => ({ role: m.role, content: m.content.slice(0, MAX_CHARS) })),
         }),
       });
       const body = await response.json().catch(() => ({}));
       if (response.ok) {
-        setMessages((m) => [...m, { role: "assistant", content: body.answer, lang: body.lang ?? "en", wanted: profile.lang, cards: body.cards,
+        setMessages((m) => [...m, { role: "assistant", content: body.answer, cards: body.cards,
                                      tools: body.tools_used, source: body.source, until: body.data_until_clock }]);
       } else {
         const notice = response.status === 429 ? body.detail : PROBLEM[response.status] ?? PROBLEM.other;
@@ -136,7 +135,7 @@ export default function Chat({ profile, clock, docked, open, onClose }) {
       <header className="chat-head">
         <div>
           <h2 id="chat-title">Ask the match</h2>
-          <p className="chat-until">Data up to <bdi dir="ltr">{clock ?? "00:00"}</bdi></p>
+          <p className="chat-until">Data up to {clock ?? "00:00"}</p>
         </div>
         {messages.length > 0 && (
           <button className="chat-clear" onClick={() => setMessages([])} disabled={busy}>Clear chat</button>
@@ -155,12 +154,11 @@ export default function Chat({ profile, clock, docked, open, onClose }) {
         )}
         {messages.map((m, i) => (
           <div key={i} className={`bubble ${m.role}${m.source === "declined" ? " declined" : ""}`}>
-            <p lang={m.lang} dir={dirOf(m.lang)}><Text>{m.content}</Text></p>
-            {m.role === "assistant" && <Untranslated wanted={m.wanted} got={m.lang} />}
+            <p>{m.content}</p>
             {m.tools?.length > 0 && (
               <p className="used">Used: {m.tools.map((t) => <span key={t}>{TOOL_LABEL[t] ?? t}</span>)}</p>
             )}
-            {m.cards?.map((card, j) => <Card key={j} card={card} dir={dirOf(m.lang)} />)}
+            {m.cards?.map((card, j) => <Card key={j} card={card} />)}
           </div>
         ))}
         {busy && (

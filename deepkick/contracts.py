@@ -67,7 +67,7 @@ OVERLAY_FIELDS = frozenset(
     {"overlay_id", "type", "match_clock", "show_at_ms", "duration_ms", "priority", "persona", "lang", "payload"}
 )
 PERSONAS = ("analyst", "casual", "player")
-LANGS = ("en", "ar")
+LANGS = ("en",)  # overlays are English only
 PAYLOAD_FIELDS = frozenset({"player", "headline", "detail", "why", "evidence", "source"})
 SOURCES = ("model", "template")  # who wrote the overlay text: the Foundry model or a stats template
 

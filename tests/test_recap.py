@@ -8,8 +8,7 @@ import pytest
 
 from deepkick.agents.narrative import NarrativeAgent
 from deepkick.agents.persona import PersonaAgent
-from deepkick.agents.recap import (SYSTEM_PROMPT, RecapAgent, check_recap, goals, recap_inputs, select_recap,
-                                   template_recap)
+from deepkick.agents.recap import SYSTEM_PROMPT, RecapAgent, check_recap, goals, recap_inputs, template_recap
 from deepkick.contracts import PERSONAS
 from deepkick.orchestrator import Orchestrator, replay_events
 from deepkick.simulator import clock_seconds
@@ -51,7 +50,7 @@ def test_the_full_time_recap_names_all_eight_goals_with_scorer_and_minute(finish
     inputs = recap_inputs(*full_time)
     assert len(goals(inputs)) == GOALS
     for persona in PERSONAS:
-        full, half = (r["text"] for r in finished.recaps(persona, "en"))
+        full, half = (r["text"] for r in finished.recaps(persona))
         assert _mentions_every_goal(full, inputs), persona
         assert "Florin Underhay" in full and "Florin Underhay" not in half  # a second-half goal is not in the HT recap
         assert full.startswith("Full-time: Ashvale Wanderers 3-5 Calderbrook Athletic.")
@@ -131,7 +130,7 @@ def test_templates_pass_their_own_checks(full_time):
 
 
 def test_catch_up_at_30_minutes_contains_nothing_after_30_minutes(finished):
-    catch = finished.catch_up("casual", "en", 10, at="30:00")
+    catch = finished.catch_up("casual", 10, at="30:00")
     assert catch["at"] == "30:00" and catch["from"] == "20:00" and catch["minutes"] == 10
     clocks = [m["match_clock"] for m in catch["moments"]]
     assert clocks and all("20:00" < c <= "30:00" for c in clocks)
@@ -147,18 +146,7 @@ def test_catch_up_at_30_minutes_contains_nothing_after_30_minutes(finished):
 
 
 def test_catch_up_headlines_follow_the_viewers_persona(finished):
-    casual = finished.catch_up("casual", "en", 30, at="45:00")["moments"]
-    analyst = finished.catch_up("analyst", "en", 30, at="45:00")["moments"]
+    casual = finished.catch_up("casual", 30, at="45:00")["moments"]
+    analyst = finished.catch_up("analyst", 30, at="45:00")["moments"]
     assert [m["match_clock"] for m in casual] == [m["match_clock"] for m in analyst]
     assert [m["headline"] for m in casual] != [m["headline"] for m in analyst]
-
-
-def test_an_untranslated_recap_is_served_in_english_marked_as_english(finished):
-    record = finished._recaps[-1]
-    english = select_recap(record, "casual", "ar")
-    assert english["lang"] == "en" and english["text"] == record["versions"]["casual"]["text"]  # no Translator here
-    lost = record | {"translations": {"ar": {p: {"text": "نص", "fallback": True} for p in PERSONAS}}}
-    assert select_recap(lost, "casual", "ar")["lang"] == "en"
-    done = record | {"translations": {"ar": {p: {"text": "نص", "fallback": False} for p in PERSONAS}}}
-    shown = select_recap(done, "casual", "ar")
-    assert (shown["lang"], shown["text"]) == ("ar", "نص")

@@ -6,7 +6,7 @@ export function clockMs(matchClock) {
   return (minutes * 60 + seconds) * 1000;
 }
 
-// overlay_id is "<moment_id>-<persona>-<lang>"; the moment is what stays the same across personas.
+// overlay_id is "<moment_id>-<persona>-en"; the moment is what stays the same across personas.
 export const momentKey = (overlay) => overlay.overlay_id.split("-").slice(0, -2).join("-");
 
 export function useMatchState(everyMs = 1000) {
@@ -34,7 +34,7 @@ export function useOverlaySocket(profile, onOverlay) {
   handler.current = onOverlay;
 
   useEffect(() => {
-    const params = new URLSearchParams({ persona: profile.persona, lang: profile.lang });
+    const params = new URLSearchParams({ persona: profile.persona });
     const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws?${params}`;
     let socket, retry, attempt = 0, stopped = false;
 
@@ -59,7 +59,7 @@ export function useOverlaySocket(profile, onOverlay) {
       clearTimeout(retry);
       socket.close();
     };
-  }, [profile.persona, profile.lang]);
+  }, [profile.persona]);
 
   return status;
 }
@@ -99,16 +99,6 @@ export function useSmoothClock(state) {
   return `${pad(Math.floor(seconds / 60))}:${pad(seconds % 60)}`;
 }
 
-// In right-to-left text an English name, a score ("1-0" displays as "0-1") or a clock next to Arabic words is
-// reordered by the bidi algorithm. A run of Latin letters and digits, joined across spaces and inner punctuation,
-// is split out so the view can isolate it left-to-right. A run never ends in punctuation, so a full stop or comma
-// after a name stays in the Arabic sentence.
-const LTR = /([A-Za-z0-9](?:[A-Za-z0-9]|\s?[-–]\s?(?=\d)|[\s'’.:](?=[A-Za-z0-9])|(?<=\d),(?=\d))*)/;
-
-/** The text as [part, isLtr] pairs: names, numbers, scores and clocks marked so they can render left-to-right. */
-export function splitLtr(text) {
-  return text.split(LTR).filter(Boolean).map((part) => [part, /^[A-Za-z0-9]/.test(part)]);
-}
 
 // At replay speed each lower-third holds the screen for many match minutes, so the queue falls behind the clock.
 const STALE_MS = 60_000; // waited over a match minute: the feed already has it, so skip it on the pitch

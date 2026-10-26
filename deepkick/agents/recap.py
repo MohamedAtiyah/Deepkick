@@ -175,15 +175,12 @@ class RecapAgent:
         return out
 
 
-def select_recap(record: dict[str, Any], persona: str, lang: str) -> dict[str, Any]:
-    """One stored recap for a viewer: the persona's text in `lang`, or in English (and `lang` "en") if it was not
-    translated."""
+def select_recap(record: dict[str, Any], persona: str) -> dict[str, Any]:
+    """One stored recap for a viewer: the persona's text."""
     moment, versions = record["moment"], record["versions"]
-    version = record.get("translations", {}).get(lang, {}).get(persona) if lang != "en" else None
-    translated = version is not None and not version["fallback"]
-    return {"recap_id": f"{moment['moment_id']}-{persona}-{lang}", "type": moment["type"],
+    return {"recap_id": f"{moment['moment_id']}-{persona}", "type": moment["type"],
             "match_clock": moment["match_clock"], "score": record["score"], "persona": persona,
-            "lang": lang if translated else "en", "text": (version if translated else versions[persona])["text"],
+            "text": versions[persona]["text"],
             "source": "template" if versions[persona]["fallback"] else "model"}
 
 

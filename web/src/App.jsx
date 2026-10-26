@@ -38,7 +38,7 @@ function ThemeToggle() {
 }
 
 export default function App() {
-  const [profile, setProfile] = useState({ persona: "casual", lang: "en" });
+  const [profile, setProfile] = useState({ persona: "casual" });
   // Latest overlay per moment: a persona switch replaces the text of what is already on screen.
   const [overlays, setOverlays] = useState(() => new Map());
   const state = useMatchState();
@@ -59,7 +59,7 @@ export default function App() {
   useCommentary(overlays, state?.match_clock, commentary);
   const [selected, setSelected] = useState(null); // a moment picked on the timeline: { key, coordinates, team }
   const feed = (
-    <Feed overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} selected={selected?.key} />
+    <Feed overlays={overlays} matchClock={state?.match_clock} selected={selected?.key} />
   );
 
   return (
@@ -91,7 +91,7 @@ export default function App() {
           <Timeline state={state} profile={profile} overlays={overlays} selected={selected} onSelect={setSelected} />
           <section className="pitch-card" aria-label="Pitch">
             <Pitch state={state} highlight={selected} />
-            <OverlayStack overlays={overlays} matchClock={state?.match_clock} lang={profile.lang} />
+            <OverlayStack overlays={overlays} matchClock={state?.match_clock} />
           </section>
           <Tabs state={state} profile={profile} />
           {!isWide && (

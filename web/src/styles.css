@@ -314,7 +314,6 @@ button, select { font: inherit; color: inherit; }
 .overlay.goal, .overlay.p5 { border-left-color: var(--warning); }
 .overlay header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .overlay h2 { margin-bottom: 4px; font-family: var(--font-display); font-size: 30px; font-weight: 700; line-height: 1.05; }
-.overlay [lang="ar"] h2 { font-family: inherit; font-size: 22px; line-height: 1.45; }
 .overlay p { font-size: 15px; line-height: 1.45; }
 .overlay .why { margin-top: 4px; color: var(--text-muted); }
 @keyframes slide-in { from { opacity: 0; transform: translateY(12px); } }
@@ -333,7 +332,6 @@ button, select { font: inherit; color: inherit; }
 .feed { gap: 14px; }
 .card header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
 .card h3 { margin-bottom: 6px; font-family: var(--font-display); font-size: 22px; font-weight: 700; line-height: 1.1; }
-.card [lang="ar"] h3 { font-family: inherit; font-size: 17px; line-height: 1.5; }
 .card p { font-size: 14px; line-height: 1.45; }
 .card .why { margin-top: 4px; color: var(--text-muted); }
 
@@ -439,9 +437,6 @@ button, select { font: inherit; color: inherit; }
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
 
-/* Arabic overlay and recap text: a font stack that shapes Arabic well. Direction is set on those blocks alone. */
-[lang="ar"] { font-family: "Geeza Pro", "Noto Naskh Arabic", "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif; }
-[lang="ar"] h2, [lang="ar"] h3, [lang="ar"] p, [lang="ar"] strong { line-height: 1.55; }
 
 /* Match timeline: momentum bars in the club colours (secondary outline, so dark primaries show on dark themes),
    moment markers, the half-time line and the clock. */
@@ -662,6 +657,3 @@ button, select { font: inherit; color: inherit; }
 .stat-card thead th { font-size: 12px; }
 .stat-card td { font-family: var(--font-display); font-size: 18px; font-weight: 700; white-space: nowrap; }
 .stat-card tbody tr + tr { border-top: 1px solid var(--border); }
-
-/* Shown when Arabic was asked for but the text came back in English. */
-.untranslated { display: block; margin-top: 6px; color: var(--text-muted); font-size: 12px; }
