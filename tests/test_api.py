@@ -47,11 +47,11 @@ def _wait_until(check, timeout=10.0):
         time.sleep(0.02)
 
 
-def _settled_recap(client, persona="analyst"):
-    """The recap once it has stopped growing (the stream is paused and the queue has drained)."""
-    previous = None
+def _settled_backlog(client, persona="analyst"):
+    """The released overlays, oldest first, once they stop growing (the stream is paused and the queue drained)."""
+    orchestrator, previous = client.app.state.orchestrator, None
     while True:
-        current = client.get("/recap", params={"persona": persona}).json()
+        current = orchestrator.history(orchestrator.profile | {"persona": persona})
         if current and current == previous:
             return current
         previous = current
@@ -73,18 +73,15 @@ def test_state_is_the_match_snapshot(finished):
     assert {"goals", "shots", "xg", "possession_pct", "momentum"} <= state["teams"]["ASH"].keys()
 
 
-def test_recap_is_newest_first_with_persona_and_limit(finished):
-    recap = finished.get("/recap").json()
-    assert len(recap) == TOTAL
-    assert [o["show_at_ms"] for o in recap] == sorted((o["show_at_ms"] for o in recap), reverse=True)
-    for overlay in recap:
-        validate_overlay(overlay)
-    casual = finished.get("/recap", params={"persona": "casual", "limit": 5}).json()
-    assert len(casual) == 5 and {o["persona"] for o in casual} == {"casual"}
-    assert [o["overlay_id"].rsplit("-", 2)[0] for o in casual] == [o["overlay_id"].rsplit("-", 2)[0]
-                                                                  for o in recap[:5]]
+def test_recap_returns_the_half_and_full_time_recaps_newest_first_per_persona(finished):
+    recap = finished.get("/recap").json()  # the run's persona, analyst
+    assert [r["type"] for r in recap] == ["full_time", "half_time"]
+    assert [r["match_clock"] for r in recap] == ["90:00", "45:00"] and recap[0]["score"] == {"ASH": 2, "CAL": 3}
+    assert {r["persona"] for r in recap} == {"analyst"} and {r["lang"] for r in recap} == {"en"}
+    assert all(r["source"] == "template" and r["text"] for r in recap)  # no Foundry settings in tests
+    casual = finished.get("/recap", params={"persona": "casual"}).json()
+    assert {r["persona"] for r in casual} == {"casual"} and casual[0]["text"] != recap[0]["text"]
     assert finished.get("/recap", params={"persona": "coach"}).status_code == 422
-    assert finished.get("/recap", params={"limit": 0}).status_code == 422
 
 
 def test_healthz_reports_stages_and_counters(finished):
@@ -98,7 +95,7 @@ def test_healthz_reports_stages_and_counters(finished):
 def test_websocket_sends_the_backlog_then_live_overlays_per_viewer():
     gate = threading.Event()
     with TestClient(create_app(_orchestrator(), _paused_at_half_time(gate))) as client:
-        backlog = _settled_recap(client)[::-1]  # oldest first, as the socket sends it
+        backlog = _settled_backlog(client)  # oldest first, as the socket sends it
         assert 0 < len(backlog) < TOTAL
         with client.websocket_connect("/ws?persona=analyst") as analyst, \
                 client.websocket_connect("/ws?persona=casual&club=ASH&player=ASH09") as casual:
@@ -181,5 +178,5 @@ def test_arabic_overlays_over_ws_and_recap_with_a_mocked_translator():
         assert [x["label"] for x in a["payload"]["evidence"]] == [ARABIC + x["label"] for x in e["payload"]["evidence"]]
         assert [x["value"] for x in a["payload"]["evidence"]] == [x["value"] for x in e["payload"]["evidence"]]
         assert a["payload"]["source"] == e["payload"]["source"] == "template"  # the model client always fails here
-    assert recap[0] == ar[-1]
-    assert len(requests) <= TOTAL  # at most one batched call per moment, fewer once strings repeat
+    assert [r["lang"] for r in recap] == ["ar", "ar"] and all(r["text"].startswith(ARABIC) for r in recap)
+    assert len(requests) <= TOTAL + 2  # one batched call per moment and per recap, fewer once strings repeat

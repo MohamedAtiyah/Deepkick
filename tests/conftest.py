@@ -18,7 +18,8 @@ def no_real_azure(monkeypatch):
     import dotenv
 
     monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: False)
-    for key in [k for k in os.environ if k.startswith(("FOUNDRY_", "AZURE_TRANSLATOR_", "EVENTHUB_"))]:
+    prefixes = ("FOUNDRY_", "AZURE_TRANSLATOR_", "AZURE_SPEECH_", "EVENTHUB_")
+    for key in [k for k in os.environ if k.startswith(prefixes)]:
         monkeypatch.delenv(key)
 
 

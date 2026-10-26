@@ -18,7 +18,8 @@ from agent_framework import Executor, WorkflowBuilder, WorkflowContext, handler
 
 from deepkick.agents.narrative import NarrativeAgent, rate_limit_count, template_narrative
 from deepkick.agents.persona import PersonaAgent, select_overlay, template_versions
-from deepkick.agents.translate import Translator, translate_versions
+from deepkick.agents.recap import RECAP_TYPES, RecapAgent, catch_up, select_recap
+from deepkick.agents.translate import Translator, translate_recap, translate_versions
 from deepkick.contracts import LANGS, PERSONAS
 from deepkick.moments import MomentDetector
 from deepkick.simulator import clock_seconds
@@ -89,9 +90,10 @@ class Orchestrator:
     def __init__(self, narrator: NarrativeAgent | None = None, personas: PersonaAgent | None = None,
                  profile: dict[str, Any] | None = None, workers: int = WORKERS, cap: int = CAP_PER_MINUTE,
                  emit: Callable[[dict[str, Any]], None] = lambda overlay: None,
-                 translator: Translator | None = None) -> None:
+                 translator: Translator | None = None, recapper: RecapAgent | None = None) -> None:
         self.stats, self.detector = StatsAgent(), MomentDetector()
         self.narrator, self.personas = narrator or NarrativeAgent(), personas or PersonaAgent()
+        self.recapper = recapper or RecapAgent()
         self.translator = translator or Translator.from_env()
         self.profile = profile or {"persona": "analyst", "favourite_club": None, "favourite_player": None, "lang": "en"}
         self.workers, self.cap, self.emit = workers, cap, emit
@@ -100,6 +102,9 @@ class Orchestrator:
         # Called with (moment, versions) for each released moment, so every viewer can render their own overlay.
         self.listeners: list[Callable[[dict[str, Any], dict[str, Any]], None]] = []
         self._released: list[tuple[dict[str, Any], dict[str, Any]]] = []
+        # Every detected moment in match order, with the score and momentum right after it (for catch-up).
+        self._timeline: list[dict[str, Any]] = []
+        self._recaps: list[dict[str, Any]] = []  # half-time and full-time recaps, in match order
         self._start, self._rate_limits_before = time.monotonic(), rate_limit_count()
         self._minute: int | None = None
         self._held: list[tuple[dict[str, Any], dict[str, Any]]] = []  # (moment, snapshot) of the open minute
@@ -114,6 +119,46 @@ class Orchestrator:
     def history(self, profile: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         """Every overlay released so far for a viewer profile (default: the run's), in match-clock order."""
         return [select_overlay(m, v, profile or self.profile) for m, v in self._released]
+
+    def recaps(self, persona: str, lang: str) -> list[dict[str, Any]]:
+        """The half-time and full-time recaps written so far for (persona, lang), newest first."""
+        return [select_recap(record, persona, lang) for record in self._recaps[::-1]]
+
+    def catch_up(self, persona: str, lang: str, minutes: int, at: str | None = None) -> dict[str, Any]:
+        """The last `minutes` of match clock up to `at` (default: now), with headlines in the viewer's words."""
+        profile = self.profile | {"persona": persona, "lang": lang}
+        headlines = {m["moment_id"]: select_overlay(m, v, profile)["payload"]["headline"] for m, v in self._released}
+        return catch_up(self._timeline, headlines, at or self.stats.snapshot()["match_clock"], minutes)
+
+    def timeline(self, profile: dict[str, Any]) -> dict[str, Any]:
+        """The momentum series and released moments up to the current clock, with overlay ids for `profile`."""
+        clock = self.stats.match_clock
+        now = clock_seconds({"match_clock": clock})
+        coordinates = {e["moment"]["moment_id"]: e["coordinates"] for e in self._timeline}
+        moments = []
+        for moment, versions in list(self._released):
+            if clock_seconds(moment) > now:
+                continue
+            overlay = select_overlay(moment, versions, self.profile | profile)
+            moments.append({"overlay_id": overlay["overlay_id"], "minute": clock_seconds(moment) // 60 + 1,
+                            "match_clock": moment["match_clock"], "type": moment["type"],
+                            "priority": overlay["priority"], "team": moment["team"],
+                            "coordinates": coordinates.get(moment["moment_id"])})
+        return {"clock": clock, "minutes": [dict(entry) for entry in list(self.stats.momentum_series)
+                                            if entry["minute"] <= now // 60],
+                "moments": moments}
+
+    def released_moment(self, overlay_id: str) -> dict[str, Any] | None:
+        """The released moment behind an overlay id ("<moment_id>-<persona>-<lang>"), or None."""
+        moment_id = overlay_id.rsplit("-", 2)[0]
+        return next((moment for moment, _ in self._released if moment["moment_id"] == moment_id), None)
+
+    def released_overlay(self, overlay_id: str, persona: str, lang: str) -> dict[str, Any] | None:
+        """The released overlay with this id for (persona, lang), or None if no released moment has that id."""
+        for moment, versions in self._released:
+            if f"{moment['moment_id']}-{persona}-{lang}" == overlay_id:
+                return select_overlay(moment, versions, self.profile | {"persona": persona, "lang": lang})
+        return None
 
     def summary(self) -> dict[str, Any]:
         """The run's counters so far (for /healthz and the end-of-run log)."""
@@ -136,6 +181,11 @@ class Orchestrator:
         for moment in self.detector.detect(event, snapshot):
             self.counts["moments"] += 1
             self._held.append((moment, snapshot))
+            # Coordinates only for a player's own action: they are in that team's frame, and match-wide moments
+            # (half-time, momentum swings) have no single place on the pitch.
+            self._timeline.append({"moment": moment, "score": dict(snapshot["score"]),
+                                   "momentum": {t: s["momentum"]["value"] for t, s in snapshot["teams"].items()},
+                                   "coordinates": event["coordinates"] if moment["player"] else None})
 
     def close_minute(self) -> None:
         """Apply the per-minute cap to the held moments and queue the kept ones for model work."""
@@ -174,7 +224,20 @@ class Orchestrator:
                      (time.monotonic() - start) * 1000, "yes" if fallback else "no", "yes" if model else "no")
             self._done[moment["moment_id"]] = record
             self._release()
+            if moment["type"] in RECAP_TYPES:  # after the overlay is out, so the recap call never delays it
+                await self._recap(moment, snapshot)
             self._queue.task_done()
+
+    async def _recap(self, moment: dict[str, Any], snapshot: dict[str, Any]) -> None:
+        """Write, translate and store the recaps for a half_time or full_time moment."""
+        moments = [entry["moment"] for entry in self._timeline]
+        versions = await asyncio.to_thread(self.recapper.write, moment, snapshot, moments)
+        translations = {lang: await asyncio.to_thread(translate_recap, versions, self.translator, lang,
+                                                      moment["event_id"])
+                        for lang in LANGS if lang != "en"} if self.translator else {}
+        self._recaps.append({"moment": moment, "score": dict(snapshot["score"]), "versions": versions,
+                             "translations": translations})
+        self._recaps.sort(key=lambda record: clock_seconds(record["moment"]))
 
     def _release(self) -> None:
         """Emit finished moments in match-clock order, holding any that finished before an earlier moment."""

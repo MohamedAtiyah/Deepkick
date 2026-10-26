@@ -114,6 +114,8 @@ class StatsAgent:
         self._ball: dict[str, Any] | None = None
         # (clock, team, "shots" | "xg" | "final_third_entries" | "possession", amount) inside the momentum window
         self._recent: deque[tuple[int, str, str, float]] = deque()
+        # {"minute": n, "momentum": home value minus away value} for each completed minute of match clock
+        self.momentum_series: list[dict[str, Any]] = []
 
     def update(self, event: dict[str, Any]) -> bool:
         """Apply one event; return False if it was skipped as malformed or a duplicate."""
@@ -144,6 +146,7 @@ class StatsAgent:
 
     def _apply(self, event: dict[str, Any]) -> None:
         clock = clock_seconds(event)
+        self._close_minutes(clock)
         # The team that held the ball since the previous event gets the elapsed time.
         if self._possession is not None and clock > self._clock:
             self._team(self._possession).possession_seconds += clock - self._clock
@@ -213,6 +216,20 @@ class StatsAgent:
             player.distance_m += payload["distance_m"]
             team.top_run_speed_kmh = max(team.top_run_speed_kmh, payload["speed_kmh"])
             player.top_run_speed_kmh = max(player.top_run_speed_kmh, payload["speed_kmh"])
+
+    def _close_minutes(self, clock: int) -> None:
+        """Record home-minus-away momentum for every minute completed before `clock`, as it stood at that minute's end.
+
+        Runs before the event at `clock` is applied; a minute with no events repeats the last value.
+        """
+        completed = clock // 60
+        if len(self.score) != 2 or completed <= len(self.momentum_series):
+            return
+        values = self.momentum()
+        home, away = self.score
+        diff = round(values[home]["value"] - values[away]["value"], 1)
+        self.momentum_series += [{"minute": minute, "momentum": diff}
+                                 for minute in range(len(self.momentum_series) + 1, completed + 1)]
 
     def momentum(self) -> dict[str, dict[str, Any]]:
         """Each team's shots, xG, possession and final-third entries in the last 5 minutes, and its momentum share.
