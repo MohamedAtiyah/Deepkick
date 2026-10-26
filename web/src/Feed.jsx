@@ -9,8 +9,6 @@ const CLUB_OF = Object.fromEntries(league.clubs.flatMap((club) =>
 const edge = (player) => CLUB_OF[player] && { "--club": CLUB_OF[player].primary,
                                                "--club-2": CLUB_OF[player].secondary };
 
-export const SOURCE = { model: "AI-explained", template: "Stats template" };
-
 /** A list of cited facts as label: value; values stay left-to-right in Arabic. */
 export const EvidenceList = ({ evidence, lang, dir, ...props }) => (
   <dl className="evidence" lang={lang} dir={dir} {...props}>
@@ -20,14 +18,13 @@ export const EvidenceList = ({ evidence, lang, dir, ...props }) => (
   </dl>
 );
 
-/** An "AI-explained" badge when the model wrote the card, and a collapsible list of the facts it cites. */
+/** A collapsible list of the facts the card cites. */
 function HowWeKnow({ payload, lang, dir }) {
   const [open, setOpen] = useState(false);
   const id = useId();
   return (
     <>
       <div className="how">
-        {payload.source === "model" && <span className="source model">{SOURCE.model}</span>}
         {payload.evidence.length > 0 && (
           <button aria-expanded={open} aria-controls={id} onClick={() => setOpen(!open)}>How we know</button>
         )}

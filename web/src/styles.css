@@ -158,7 +158,6 @@ button, select { font: inherit; color: inherit; }
 .recap-item { padding: 10px 0; border-top: 1px solid var(--border); }
 .recap-item:first-of-type { border-top: 0; }
 .recap-item header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-.recap-item .source { margin-left: auto; }
 .recap-item p { font-size: 14px; line-height: 1.55; }
 
 .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; align-self: flex-end; }
@@ -338,17 +337,8 @@ button, select { font: inherit; color: inherit; }
 .card p { font-size: 14px; line-height: 1.45; }
 .card .why { margin-top: 4px; color: var(--text-muted); }
 
-/* "How we know": who wrote the card, and the facts it cites. */
+/* "How we know": the facts a card cites. */
 .how { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-.source {
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-.source.model { border-color: transparent; background: color-mix(in srgb, var(--success) 14%, var(--surface)); color: var(--success); }
 .how button {
   margin-left: auto;
   padding: 2px 4px;
